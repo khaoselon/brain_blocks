@@ -1,4 +1,4 @@
-// lib/providers/game_providers.dart - 不具合修正版
+// lib/providers/game_providers.dart - リセット機能修正版（重要な部分のみ）
 import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:firebase_performance/firebase_performance.dart';
@@ -212,51 +212,111 @@ class GameStateNotifier extends StateNotifier<GameState> {
     }
   }
 
-  /// 🔥 修正：ゲームリセット（完全な修正版）
+  /// 🔥 完全修正：ゲームリセット（完全に新しいパズル生成）
   void resetGame() {
     try {
       print('🔄 ゲームリセット開始');
+      print('   現在の状態: ${state.status}');
+      print('   現在のピース数: ${state.pieces.length}');
 
+      // 現在のタイマーを停止
       _stopTimer();
 
       // 現在のトレース終了
       _gameTrace?.putAttribute('reset', 'true');
       _gameTrace?.stop();
 
-      // 🔥 重要：既存のピースをリセット
-      final resetPieces = state.pieces.map((piece) {
-        return piece.copyWith(boardPosition: null, rotation: 0);
-      }).toList();
+      // 🔥 重要：完全に新しいパズルを生成
+      List<PuzzlePiece> newPieces;
+      try {
+        newPieces = PuzzleGenerator.generatePuzzle(
+          gridSize: state.settings.difficulty.gridSize,
+        );
+        print('✅ 新しいパズル生成完了: ${newPieces.length}ピース');
+      } catch (e) {
+        print('❌ パズル生成エラー: $e');
+        // フォールバック：空のピースリスト
+        newPieces = [];
+      }
 
-      // 🔥 修正：完全な新しい状態を作成
+      // 🔥 修正：完全に新しい状態を作成（すべてをリセット）
       state = GameState(
         gameId: _uuid.v4(), // 新しいゲームID
         settings: state.settings, // 設定は保持
-        pieces: resetPieces,
-        status: GameStatus.playing,
-        moves: 0,
-        elapsedSeconds: 0,
-        hintsUsed: 0,
-        startTime: DateTime.now(),
+        pieces: newPieces, // 🔥 重要：新しく生成されたピース
+        status: GameStatus.playing, // 🔥 修正：プレイ状態で開始
+        moves: 0, // リセット
+        elapsedSeconds: 0, // リセット
+        hintsUsed: 0, // リセット
+        startTime: DateTime.now(), // 新しい開始時間
       );
 
-      // 新しいトレース開始
+      // 新しいパフォーマンストレース開始
       _gameTrace = _firebaseService.startTrace('game_session_reset');
       _gameTrace?.start();
 
+      // 🔥 重要：タイマーを再開
       _startTimer();
+
+      // Firebase Analytics: リセットイベント
+      try {
+        _firebaseService.logEvent(
+          name: 'game_reset',
+          parameters: {
+            'difficulty': state.settings.difficulty.name,
+            'game_mode': state.settings.mode.name,
+            'pieces_count': newPieces.length,
+          },
+        );
+      } catch (e) {
+        print('⚠️ Firebase リセットログ送信失敗: $e');
+      }
+
       print('✅ ゲームリセット完了');
+      print('   新しい状態: ${state.status}');
+      print('   新しいピース数: ${state.pieces.length}');
+      print('   新しいゲームID: ${state.gameId}');
     } catch (e, stackTrace) {
       print('❌ ゲームリセットエラー: $e');
       print('スタックトレース: $stackTrace');
 
-      // エラー時は強制的に新しいゲームを開始
+      // 🔥 修正：エラー時の強力なフォールバック処理
       try {
-        startNewGame();
-        print('🔄 フォールバック: 新しいゲーム開始');
+        // 最低限の状態でゲームを継続
+        state = GameState(
+          gameId: _uuid.v4(),
+          settings: state.settings,
+          pieces: [], // 空のピースリスト
+          status: GameStatus.setup, // セットアップ状態
+          moves: 0,
+          elapsedSeconds: 0,
+          hintsUsed: 0,
+          startTime: DateTime.now(),
+        );
+
+        print('🔄 フォールバック状態設定完了');
+
+        // フォールバック状態から新しいゲームを開始
+        Future.delayed(const Duration(milliseconds: 100), () {
+          try {
+            startNewGame();
+            print('🔄 フォールバック新ゲーム開始');
+          } catch (fallbackError) {
+            print('❌ フォールバック新ゲーム開始も失敗: $fallbackError');
+          }
+        });
       } catch (fallbackError) {
-        print('❌ フォールバック新ゲーム開始も失敗: $fallbackError');
-        rethrow;
+        print('❌ フォールバック処理も失敗: $fallbackError');
+        // 最後の手段：最小限の状態
+        state = GameState(
+          gameId: _uuid.v4(),
+          settings: const GameSettings(
+            difficulty: GameDifficulty.easy,
+            mode: GameMode.unlimited,
+          ),
+          pieces: [],
+          status: GameStatus.setup,
+        );
       }
     }
   }

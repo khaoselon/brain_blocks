@@ -420,9 +420,9 @@ class _GameScreenState extends ConsumerState<GameScreen>
     }
   }
 
-  /// 🔥 修正：リセット機能の改善
+  /// 🔥 完全修正：リセット機能の改善
   void _resetGame() {
-    if (_isDialogShowing) return; // 🔥 修正：ダイアログ表示中は無効
+    if (_isDialogShowing) return; // ダイアログ表示中は無効
 
     setState(() {
       _isDialogShowing = true;
@@ -430,6 +430,7 @@ class _GameScreenState extends ConsumerState<GameScreen>
 
     showDialog<bool>(
       context: context,
+      barrierDismissible: false, // 🔥 修正：バリア無効化
       builder: (context) => AlertDialog(
         title: const Row(
           children: [
@@ -438,7 +439,17 @@ class _GameScreenState extends ConsumerState<GameScreen>
             Text('ゲームリセット'),
           ],
         ),
-        content: const Text('現在の進行状況がリセットされます。\nよろしいですか？'),
+        content: const Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text('現在の進行状況がリセットされ、\n新しいパズルが生成されます。'),
+            SizedBox(height: 8),
+            Text(
+              'この操作は取り消せません。',
+              style: TextStyle(color: Colors.red, fontWeight: FontWeight.w600),
+            ),
+          ],
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(false),
@@ -450,7 +461,7 @@ class _GameScreenState extends ConsumerState<GameScreen>
               backgroundColor: const Color(0xFF2E86C1),
               foregroundColor: Colors.white,
             ),
-            child: const Text('リセット'),
+            child: const Text('リセット実行'),
           ),
         ],
       ),
@@ -461,13 +472,34 @@ class _GameScreenState extends ConsumerState<GameScreen>
 
       if (confirmed == true) {
         try {
-          // 🔥 修正：状態をリセットしてから新しいゲーム開始
+          print('🔄 ユーザーがリセットを確認 - 実行開始');
+
+          // 🔥 重要：resetGameメソッドを呼び出し
           ref.read(gameStateProvider.notifier).resetGame();
-          _showInfoMessage('ゲームをリセットしました');
+
+          // 🔥 修正：成功メッセージと触覚フィードバック
+          HapticFeedback.mediumImpact();
+          _showSuccessMessage('新しいパズルでゲームをリセットしました！');
+
           print('✅ ゲームリセット成功');
-        } catch (e) {
+        } catch (e, stackTrace) {
           print('❌ ゲームリセットエラー: $e');
-          _showErrorMessage('ゲームリセットに失敗しました');
+          print('スタックトレース: $stackTrace');
+
+          // エラー時のフォールバック処理
+          HapticFeedback.heavyImpact();
+          _showErrorMessage('リセットに失敗しました。もう一度お試しください。');
+
+          // 🔥 重要：エラー時は強制的に新しいゲームを開始
+          try {
+            Future.delayed(const Duration(milliseconds: 500), () {
+              ref.read(gameStateProvider.notifier).startNewGame();
+              _showInfoMessage('新しいゲームを開始しました');
+            });
+          } catch (fallbackError) {
+            print('❌ フォールバック新ゲーム開始も失敗: $fallbackError');
+            _showErrorMessage('ゲームの復旧に失敗しました。アプリを再起動してください。');
+          }
         }
       }
     });
@@ -475,13 +507,21 @@ class _GameScreenState extends ConsumerState<GameScreen>
 
   /// 🔥 修正：ポーズメニューの改善
   void _showPauseMenu() {
-    if (_isDialogShowing || _isProcessingAd) return; // 🔥 修正：重複防止
+    if (_isDialogShowing || _isProcessingAd) return; // 重複防止
 
     try {
-      ref.read(gameStateProvider.notifier).pauseGame();
-      print('✅ ゲーム一時停止');
+      // 🔥 重要：一時停止前にプレイ状態かチェック
+      final currentState = ref.read(gameStateProvider);
+      if (currentState.status == GameStatus.playing) {
+        ref.read(gameStateProvider.notifier).pauseGame();
+        print('✅ ゲーム一時停止（ポーズメニューから）');
+      } else {
+        print('⚠️ ゲームが既にプレイ状態ではありません: ${currentState.status}');
+      }
     } catch (e) {
       print('❌ ゲーム一時停止エラー: $e');
+      _showErrorMessage('一時停止に失敗しました');
+      return; // エラー時はメニューを表示しない
     }
 
     setState(() {
@@ -493,7 +533,7 @@ class _GameScreenState extends ConsumerState<GameScreen>
       barrierDismissible: false,
       builder: (context) => WillPopScope(
         onWillPop: () async {
-          // 🔥 修正：戻るボタンで閉じる時の処理
+          // 戻るボタンで閉じる時の処理
           _resumeGameFromPause();
           return true;
         },
@@ -519,6 +559,7 @@ class _GameScreenState extends ConsumerState<GameScreen>
               _buildPauseMenuItem(
                 icon: Icons.refresh,
                 title: 'リスタート',
+                subtitle: '新しいパズルで開始', // 🔥 追加：説明
                 onTap: () {
                   Navigator.of(context).pop();
                   _resetGameFromPause();
@@ -552,34 +593,57 @@ class _GameScreenState extends ConsumerState<GameScreen>
     });
   }
 
-  /// 🔥 新機能：ポーズから再開
+  /// 🔥 修正：ポーズから再開
   void _resumeGameFromPause() {
     try {
-      ref.read(gameStateProvider.notifier).resumeGame();
-      _showInfoMessage('ゲームを再開しました');
-      print('✅ ゲーム再開');
+      final currentState = ref.read(gameStateProvider);
+      if (currentState.status == GameStatus.paused) {
+        ref.read(gameStateProvider.notifier).resumeGame();
+        _showInfoMessage('ゲームを再開しました');
+        print('✅ ゲーム再開');
+      } else {
+        print('⚠️ ゲームが一時停止状態ではありません: ${currentState.status}');
+        // 強制的にプレイ状態にする
+        if (currentState.status == GameStatus.setup) {
+          ref.read(gameStateProvider.notifier).startNewGame();
+          _showInfoMessage('新しいゲームを開始しました');
+        }
+      }
     } catch (e) {
       print('❌ ゲーム再開エラー: $e');
       _showErrorMessage('ゲーム再開に失敗しました');
+
+      // エラー時は新しいゲームを開始
+      try {
+        ref.read(gameStateProvider.notifier).startNewGame();
+        _showInfoMessage('新しいゲームを開始しました');
+      } catch (fallbackError) {
+        print('❌ フォールバック新ゲーム開始も失敗: $fallbackError');
+      }
     }
   }
 
-  /// 🔥 新機能：ポーズからリセット
+  /// 🔥 修正：ポーズからリセット
   void _resetGameFromPause() {
-    // まず再開してからリセット処理
     try {
-      ref.read(gameStateProvider.notifier).resumeGame();
+      // まず一時停止状態から再開
+      final currentState = ref.read(gameStateProvider);
+      if (currentState.status == GameStatus.paused) {
+        ref.read(gameStateProvider.notifier).resumeGame();
+      }
     } catch (e) {
       print('⚠️ 再開処理でエラー: $e');
     }
 
-    // リセット処理
-    Future.delayed(const Duration(milliseconds: 100), () {
-      _resetGame();
+    // 少し遅延してからリセット処理
+    Future.delayed(const Duration(milliseconds: 200), () {
+      if (mounted) {
+        _resetGame();
+      }
     });
   }
 
-  /// 🔥 修正：メニューに戻る処理の改善
+  /// 🔥 修正：メニューに戻る処理の改善＊＊＊
   void _backToMenuFromPause() async {
     if (_isProcessingAd) return; // 🔥 修正：広告処理中は無効
 
@@ -618,10 +682,11 @@ class _GameScreenState extends ConsumerState<GameScreen>
     }
   }
 
-  /// ポーズメニューアイテム構築
+  /// 🔥 修正：ポーズメニューアイテム構築（説明追加対応）
   Widget _buildPauseMenuItem({
     required IconData icon,
     required String title,
+    String? subtitle, // 🔥 追加：説明文
     required VoidCallback onTap,
   }) {
     return Container(
@@ -635,14 +700,27 @@ class _GameScreenState extends ConsumerState<GameScreen>
             children: [
               Icon(icon, color: const Color(0xFF2E86C1)),
               const SizedBox(width: 12),
-              Text(
-                title,
-                style: const TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w500,
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                    if (subtitle != null) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        subtitle,
+                        style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                      ),
+                    ],
+                  ],
                 ),
               ),
-              const Spacer(),
               Icon(Icons.arrow_forward_ios, size: 16, color: Colors.grey[400]),
             ],
           ),
@@ -681,15 +759,23 @@ class _GameScreenState extends ConsumerState<GameScreen>
     });
   }
 
-  /// 🔥 新機能：結果画面からもう一度プレイ
+  /// 🔥 修正：結果画面からもう一度プレイ
   void _playAgainFromResult() {
     try {
       ref.read(gameStateProvider.notifier).startNewGame();
-      _showInfoMessage('新しいゲームを開始しました！');
+      _showSuccessMessage('新しいパズルでゲームを開始しました！');
       print('✅ 新しいゲーム開始（結果画面から）');
     } catch (e) {
       print('❌ 新しいゲーム開始エラー: $e');
       _showErrorMessage('新しいゲーム開始に失敗しました');
+
+      // エラー時はリセットを試行
+      try {
+        ref.read(gameStateProvider.notifier).resetGame();
+        _showInfoMessage('ゲームをリセットしました');
+      } catch (resetError) {
+        print('❌ リセットも失敗: $resetError');
+      }
     }
   }
 

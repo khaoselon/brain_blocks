@@ -1,5 +1,6 @@
-// lib/widgets/game_board_widget.dart - 修正版
+// lib/widgets/game_board_widget.dart - ドラッグ&ドロップ改善版
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../models/game_state.dart';
 import '../models/puzzle_piece.dart';
 import '../widgets/painters/game_board_painter.dart';
@@ -27,13 +28,16 @@ class _GameBoardWidgetState extends State<GameBoardWidget> {
   String? _draggedPieceId;
   PiecePosition? _dragPosition;
   bool _isDragActive = false;
+  PuzzlePiece? _draggedPiece;
+  List<PiecePosition>? _previewCells;
 
   @override
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
         final gridSize = widget.gameState.settings.difficulty.gridSize;
-        final boardSize = constraints.maxWidth.clamp(200.0, 600.0);
+        final maxSize = constraints.maxWidth.clamp(200.0, 600.0);
+        final boardSize = maxSize;
         final cellSize = boardSize / gridSize;
 
         return Container(
@@ -53,35 +57,38 @@ class _GameBoardWidgetState extends State<GameBoardWidget> {
           child: ClipRRect(
             borderRadius: BorderRadius.circular(12),
             child: DragTarget<String>(
-              // 🔥 重要：全ての文字列を受け入れる
+              // 🔥 改善：より寛容な受け入れ条件
               onWillAccept: (pieceId) {
+                if (pieceId == null || pieceId.isEmpty) return false;
+
+                final piece = _findPieceById(pieceId);
+                if (piece == null || piece.isPlaced) return false;
+
                 print('🎯 DragTarget.onWillAccept: $pieceId');
-                return pieceId != null && pieceId.isNotEmpty;
+                return true;
               },
 
-              // 🔥 重要：ドロップ処理
+              // 🔥 改善：確実なドロップ処理
               onAccept: (pieceId) {
                 print('✅ DragTarget.onAccept: $pieceId at $_dragPosition');
-                if (_dragPosition != null) {
+                if (_dragPosition != null && _draggedPiece != null) {
                   _handlePieceDrop(pieceId, _dragPosition!);
                 } else {
-                  print('❌ ドロップ位置が null です');
+                  print('❌ ドロップ処理失敗 - 位置またはピース情報が不正');
+                  _showPlacementError('配置位置が特定できませんでした');
                 }
+                _resetDragState();
               },
 
-              // 🔥 重要：ドラッグ移動の追跡
+              // 🔥 改善：精密な座標追跡
               onMove: (details) {
                 _handleDragMove(details, cellSize, gridSize);
               },
 
-              // 🔥 重要：ドラッグ終了処理
+              // ドラッグ終了処理
               onLeave: (data) {
                 print('👋 DragTarget.onLeave: $data');
-                setState(() {
-                  _draggedPieceId = null;
-                  _dragPosition = null;
-                  _isDragActive = false;
-                });
+                _resetDragState();
               },
 
               builder: (context, candidateData, rejectedData) {
@@ -97,21 +104,17 @@ class _GameBoardWidgetState extends State<GameBoardWidget> {
                       ),
                     ),
 
-                    // デバッグ用：ドラッグ位置表示
-                    if (_isDragActive && _dragPosition != null)
-                      _buildDragIndicator(cellSize),
+                    // 配置プレビュー表示
+                    if (_isDragActive && _previewCells != null)
+                      _buildPlacementPreview(cellSize),
 
                     // ヒント表示
                     if (widget.hintPieceId != null &&
                         widget.hintAnimation != null)
                       _buildHintOverlay(cellSize),
 
-                    // ドラッグ中のプレビュー
-                    if (_draggedPieceId != null && _dragPosition != null)
-                      _buildDragPreview(cellSize),
-
-                    // デバッグ情報表示
-                    _buildDebugInfo(),
+                    // デバッグ情報（開発時のみ）
+                    if (false) _buildDebugInfo(), // リリース時はfalseに
                   ],
                 );
               },
@@ -122,15 +125,23 @@ class _GameBoardWidgetState extends State<GameBoardWidget> {
     );
   }
 
-  /// 🔧 ドラッグ移動処理の修正
+  /// 🔧 改善されたドラッグ移動処理
   void _handleDragMove(
     DragTargetDetails<String> details,
     double cellSize,
     int gridSize,
   ) {
+    final pieceId = details.data;
+    final piece = _findPieceById(pieceId);
+
+    if (piece == null) {
+      print('⚠️ ピース $pieceId が見つかりません');
+      return;
+    }
+
     final localPosition = details.offset;
 
-    // 座標をグリッド位置に変換
+    // 🔧 改善：より正確な座標変換
     final gridX = (localPosition.dx / cellSize).floor();
     final gridY = (localPosition.dy / cellSize).floor();
 
@@ -140,44 +151,55 @@ class _GameBoardWidgetState extends State<GameBoardWidget> {
 
     // グリッド範囲内チェック
     if (gridX >= 0 && gridX < gridSize && gridY >= 0 && gridY < gridSize) {
+      final position = PiecePosition(gridX, gridY);
+      final rotatedCells = piece.getRotatedCells();
+      final previewCells = rotatedCells.map((cell) => cell + position).toList();
+
       setState(() {
-        _draggedPieceId = details.data;
-        _dragPosition = PiecePosition(gridX, gridY);
+        _draggedPieceId = pieceId;
+        _draggedPiece = piece;
+        _dragPosition = position;
+        _previewCells = previewCells;
         _isDragActive = true;
       });
     } else {
-      print('⚠️ グリッド範囲外: ($gridX, $gridY) / グリッドサイズ: $gridSize');
+      // 範囲外の場合はプレビューをクリア
+      setState(() {
+        _previewCells = null;
+      });
     }
   }
 
-  /// 🔧 ピースドロップ処理の修正
+  /// 🔧 改善されたピースドロップ処理
   void _handlePieceDrop(String pieceId, PiecePosition position) {
     print('🎯 ピースドロップ処理開始: $pieceId at $position');
 
-    final piece = widget.gameState.pieces.firstWhere(
-      (p) => p.id == pieceId,
-      orElse: () => throw Exception('ピース $pieceId が見つかりません'),
-    );
-
-    // 配置可能性チェック
-    if (_isValidPlacement(piece, position)) {
-      print('✅ 配置可能: $pieceId');
-      widget.onPiecePlaced(pieceId, position);
-    } else {
-      print('❌ 配置不可: $pieceId - 重複または範囲外');
-      _showPlacementError();
+    final piece = _findPieceById(pieceId);
+    if (piece == null) {
+      print('❌ ピース $pieceId が見つかりません');
+      _showPlacementError('ピースが見つかりませんでした');
+      return;
     }
 
-    // 状態リセット
-    setState(() {
-      _draggedPieceId = null;
-      _dragPosition = null;
-      _isDragActive = false;
-    });
+    // 🔧 改善：詳細な配置可能性チェック
+    final validationResult = _validatePlacement(piece, position);
+
+    if (validationResult.isValid) {
+      print('✅ 配置可能: $pieceId');
+      widget.onPiecePlaced(pieceId, position);
+      HapticFeedback.lightImpact();
+    } else {
+      print('❌ 配置不可: $pieceId - ${validationResult.reason}');
+      _showPlacementError(validationResult.reason);
+      HapticFeedback.mediumImpact();
+    }
   }
 
-  /// 🔧 配置可能性チェックの改善
-  bool _isValidPlacement(PuzzlePiece piece, PiecePosition position) {
+  /// 🔧 改善された配置検証
+  PlacementValidationResult _validatePlacement(
+    PuzzlePiece piece,
+    PiecePosition position,
+  ) {
     final gridSize = widget.gameState.settings.difficulty.gridSize;
     final rotatedCells = piece.getRotatedCells();
     final boardCells = rotatedCells.map((cell) => cell + position).toList();
@@ -192,8 +214,10 @@ class _GameBoardWidgetState extends State<GameBoardWidget> {
           cell.x >= gridSize ||
           cell.y < 0 ||
           cell.y >= gridSize) {
-        print('   ❌ 範囲外: $cell (グリッドサイズ: $gridSize)');
-        return false;
+        return PlacementValidationResult(
+          isValid: false,
+          reason: '盤面の範囲外です (${cell.x}, ${cell.y})',
+        );
       }
     }
 
@@ -207,39 +231,73 @@ class _GameBoardWidgetState extends State<GameBoardWidget> {
 
     for (final cell in boardCells) {
       if (occupiedCells.contains(cell)) {
-        print('   ❌ 重複: $cell は既に使用されています');
-        return false;
+        return PlacementValidationResult(
+          isValid: false,
+          reason: '既に他のピースが配置されています',
+        );
       }
     }
 
-    print('   ✅ 配置可能');
-    return true;
+    return PlacementValidationResult(isValid: true, reason: '');
   }
 
-  /// 🎨 ドラッグインジケーター（デバッグ用）
-  Widget _buildDragIndicator(double cellSize) {
-    if (_dragPosition == null) return const SizedBox.shrink();
+  /// ピースIDからピースオブジェクトを取得
+  PuzzlePiece? _findPieceById(String pieceId) {
+    try {
+      return widget.gameState.pieces.firstWhere((p) => p.id == pieceId);
+    } catch (e) {
+      return null;
+    }
+  }
 
-    return Positioned(
-      left: _dragPosition!.x * cellSize,
-      top: _dragPosition!.y * cellSize,
-      child: Container(
-        width: cellSize,
-        height: cellSize,
-        decoration: BoxDecoration(
-          border: Border.all(color: Colors.red, width: 3),
-          color: Colors.red.withOpacity(0.2),
-        ),
-        child: const Center(child: Icon(Icons.add, color: Colors.red)),
+  /// ドラッグ状態をリセット
+  void _resetDragState() {
+    setState(() {
+      _draggedPieceId = null;
+      _draggedPiece = null;
+      _dragPosition = null;
+      _previewCells = null;
+      _isDragActive = false;
+    });
+  }
+
+  /// 🎨 配置プレビュー表示
+  Widget _buildPlacementPreview(double cellSize) {
+    if (_previewCells == null || _draggedPiece == null) {
+      return const SizedBox.shrink();
+    }
+
+    final validationResult = _validatePlacement(_draggedPiece!, _dragPosition!);
+    final isValid = validationResult.isValid;
+    final previewColor = isValid
+        ? _draggedPiece!.color.withOpacity(0.6)
+        : Colors.red.withOpacity(0.6);
+    final borderColor = isValid ? _draggedPiece!.color : Colors.red;
+
+    return CustomPaint(
+      size: Size.infinite,
+      painter: _PlacementPreviewPainter(
+        cells: _previewCells!,
+        cellSize: cellSize,
+        fillColor: previewColor,
+        borderColor: borderColor,
+        isValid: isValid,
       ),
     );
   }
 
   /// 🎨 ヒント表示
   Widget _buildHintOverlay(double cellSize) {
-    final hintPiece = widget.gameState.pieces.firstWhere(
-      (p) => p.id == widget.hintPieceId,
-    );
+    PuzzlePiece? hintPiece;
+    try {
+      hintPiece = widget.gameState.pieces.firstWhere(
+        (p) => p.id == widget.hintPieceId,
+      );
+    } catch (e) {
+      hintPiece = null;
+    }
+
+    if (hintPiece == null) return const SizedBox.shrink();
 
     final hintPosition = _findBestHintPosition(hintPiece);
     if (hintPosition == null) return const SizedBox.shrink();
@@ -250,7 +308,7 @@ class _GameBoardWidgetState extends State<GameBoardWidget> {
         return CustomPaint(
           size: Size.infinite,
           painter: HintPainter(
-            piece: hintPiece,
+            piece: hintPiece!,
             hintPosition: hintPosition,
             cellSize: cellSize,
             animation: widget.hintAnimation!,
@@ -260,68 +318,21 @@ class _GameBoardWidgetState extends State<GameBoardWidget> {
     );
   }
 
-  /// 🎨 ドラッグプレビュー
-  Widget _buildDragPreview(double cellSize) {
-    final draggedPiece = widget.gameState.pieces.firstWhere(
-      (p) => p.id == _draggedPieceId,
-    );
-
-    return Positioned(
-      left: _dragPosition!.x * cellSize,
-      top: _dragPosition!.y * cellSize,
-      child: IgnorePointer(
-        child: Container(
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(8),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(0.3),
-                blurRadius: 8,
-                offset: const Offset(2, 2),
-              ),
-            ],
-          ),
-          child: _buildPiecePreview(draggedPiece, cellSize),
-        ),
-      ),
-    );
-  }
-
-  /// 🎨 ピースプレビュー作成
-  Widget _buildPiecePreview(PuzzlePiece piece, double cellSize) {
-    final rotatedCells = piece.getRotatedCells();
-    if (rotatedCells.isEmpty) return const SizedBox.shrink();
-
-    final minX = rotatedCells.map((c) => c.x).reduce((a, b) => a < b ? a : b);
-    final minY = rotatedCells.map((c) => c.y).reduce((a, b) => a < b ? a : b);
-    final maxX = rotatedCells.map((c) => c.x).reduce((a, b) => a > b ? a : b);
-    final maxY = rotatedCells.map((c) => c.y).reduce((a, b) => a > b ? a : b);
-
-    final width = (maxX - minX + 1) * cellSize;
-    final height = (maxY - minY + 1) * cellSize;
-
-    return SizedBox(
-      width: width,
-      height: height,
-      child: CustomPaint(
-        painter: _PiecePreviewPainter(
-          piece: piece,
-          cellSize: cellSize,
-          opacity: 0.8,
-        ),
-      ),
-    );
-  }
-
   /// 🔍 ヒント位置を探す
   PiecePosition? _findBestHintPosition(PuzzlePiece piece) {
     final gridSize = widget.gameState.settings.difficulty.gridSize;
 
-    for (int y = 0; y < gridSize; y++) {
-      for (int x = 0; x < gridSize; x++) {
-        final position = PiecePosition(x, y);
-        if (_isValidPlacement(piece, position)) {
-          return position;
+    // 4つの回転角度をすべて試す
+    for (int rotation = 0; rotation < 4; rotation++) {
+      final rotatedPiece = piece.copyWith(rotation: rotation);
+
+      for (int y = 0; y < gridSize; y++) {
+        for (int x = 0; x < gridSize; x++) {
+          final position = PiecePosition(x, y);
+          final result = _validatePlacement(rotatedPiece, position);
+          if (result.isValid) {
+            return position;
+          }
         }
       }
     }
@@ -329,27 +340,28 @@ class _GameBoardWidgetState extends State<GameBoardWidget> {
   }
 
   /// ⚠️ 配置エラー表示
-  void _showPlacementError() {
+  void _showPlacementError(String message) {
+    if (!mounted) return;
+
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('そこには配置できません'),
-        duration: Duration(seconds: 1),
+      SnackBar(
+        content: Text(message),
+        duration: const Duration(seconds: 2),
         backgroundColor: Colors.red,
+        behavior: SnackBarBehavior.floating,
       ),
     );
   }
 
   /// 🐛 デバッグ情報表示
   Widget _buildDebugInfo() {
-    if (!mounted) return const SizedBox.shrink();
-
     return Positioned(
       top: 10,
       left: 10,
       child: Container(
         padding: const EdgeInsets.all(8),
         decoration: BoxDecoration(
-          color: Colors.black.withOpacity(0.7),
+          color: Colors.black.withOpacity(0.8),
           borderRadius: BorderRadius.circular(4),
         ),
         child: Column(
@@ -360,11 +372,15 @@ class _GameBoardWidgetState extends State<GameBoardWidget> {
               style: const TextStyle(color: Colors.white, fontSize: 10),
             ),
             Text(
-              'ドラッグピース: ${_draggedPieceId ?? "なし"}',
+              'ピース: ${_draggedPieceId ?? "なし"}',
               style: const TextStyle(color: Colors.white, fontSize: 10),
             ),
             Text(
-              'ドラッグ位置: ${_dragPosition?.toString() ?? "なし"}',
+              '位置: ${_dragPosition?.toString() ?? "なし"}',
+              style: const TextStyle(color: Colors.white, fontSize: 10),
+            ),
+            Text(
+              'プレビュー: ${_previewCells?.length ?? 0}セル',
               style: const TextStyle(color: Colors.white, fontSize: 10),
             ),
           ],
@@ -374,22 +390,33 @@ class _GameBoardWidgetState extends State<GameBoardWidget> {
   }
 }
 
-/// プレビューペインター
-class _PiecePreviewPainter extends CustomPainter {
-  final PuzzlePiece piece;
-  final double cellSize;
-  final double opacity;
+/// 配置検証結果
+class PlacementValidationResult {
+  final bool isValid;
+  final String reason;
 
-  const _PiecePreviewPainter({
-    required this.piece,
+  PlacementValidationResult({required this.isValid, required this.reason});
+}
+
+/// プレビューペインター
+class _PlacementPreviewPainter extends CustomPainter {
+  final List<PiecePosition> cells;
+  final double cellSize;
+  final Color fillColor;
+  final Color borderColor;
+  final bool isValid;
+
+  const _PlacementPreviewPainter({
+    required this.cells,
     required this.cellSize,
-    required this.opacity,
+    required this.fillColor,
+    required this.borderColor,
+    required this.isValid,
   });
 
   @override
   void paint(Canvas canvas, Size size) {
     final paint = Paint();
-    final cells = piece.getRotatedCells();
 
     for (final cell in cells) {
       final rect = Rect.fromLTWH(
@@ -399,26 +426,96 @@ class _PiecePreviewPainter extends CustomPainter {
         cellSize,
       );
 
+      // 塗りつぶし
       paint
-        ..color = piece.color.withOpacity(opacity)
+        ..color = fillColor
         ..style = PaintingStyle.fill;
 
       final rrect = RRect.fromRectAndRadius(rect, const Radius.circular(4));
       canvas.drawRRect(rrect, paint);
 
+      // 境界線
       paint
-        ..color = piece.color.withOpacity(opacity * 0.8)
-        ..strokeWidth = 1.0
+        ..color = borderColor
+        ..strokeWidth = isValid ? 2.0 : 3.0
         ..style = PaintingStyle.stroke;
 
-      canvas.drawRRect(rrect, paint);
+      if (isValid) {
+        canvas.drawRRect(rrect, paint);
+      } else {
+        // 無効な場合は点線で表示
+        _drawDashedBorder(canvas, rect, paint);
+      }
+    }
+  }
+
+  void _drawDashedBorder(Canvas canvas, Rect rect, Paint paint) {
+    const dashSize = 5.0;
+    const gapSize = 3.0;
+
+    // 上辺
+    _drawDashedLine(
+      canvas,
+      rect.topLeft,
+      rect.topRight,
+      paint,
+      dashSize,
+      gapSize,
+    );
+    // 右辺
+    _drawDashedLine(
+      canvas,
+      rect.topRight,
+      rect.bottomRight,
+      paint,
+      dashSize,
+      gapSize,
+    );
+    // 下辺
+    _drawDashedLine(
+      canvas,
+      rect.bottomRight,
+      rect.bottomLeft,
+      paint,
+      dashSize,
+      gapSize,
+    );
+    // 左辺
+    _drawDashedLine(
+      canvas,
+      rect.bottomLeft,
+      rect.topLeft,
+      paint,
+      dashSize,
+      gapSize,
+    );
+  }
+
+  void _drawDashedLine(
+    Canvas canvas,
+    Offset start,
+    Offset end,
+    Paint paint,
+    double dashSize,
+    double gapSize,
+  ) {
+    final distance = (end - start).distance;
+    final dashCount = (distance / (dashSize + gapSize)).floor();
+    final direction = (end - start) / distance;
+
+    for (int i = 0; i < dashCount; i++) {
+      final dashStart = start + direction * (i * (dashSize + gapSize));
+      final dashEnd = dashStart + direction * dashSize;
+      canvas.drawLine(dashStart, dashEnd, paint);
     }
   }
 
   @override
-  bool shouldRepaint(_PiecePreviewPainter oldDelegate) {
-    return oldDelegate.piece != piece ||
+  bool shouldRepaint(_PlacementPreviewPainter oldDelegate) {
+    return oldDelegate.cells != cells ||
         oldDelegate.cellSize != cellSize ||
-        oldDelegate.opacity != opacity;
+        oldDelegate.fillColor != fillColor ||
+        oldDelegate.borderColor != borderColor ||
+        oldDelegate.isValid != isValid;
   }
 }

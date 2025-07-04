@@ -1,5 +1,6 @@
-// lib/widgets/piece_tray_widget.dart - 縦・横両対応版
+// lib/widgets/piece_tray_widget.dart - ドラッグ精度改善版
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../models/puzzle_piece.dart';
 import '../widgets/painters/piece_painter.dart';
 
@@ -7,14 +8,14 @@ class PieceTrayWidget extends StatefulWidget {
   final List<PuzzlePiece> pieces;
   final Function(String pieceId) onPieceSelected;
   final Function(String pieceId) onPieceRotated;
-  final bool isHorizontal; // 🔥 新機能：横向きレイアウトサポート
+  final bool isHorizontal;
 
   const PieceTrayWidget({
     super.key,
     required this.pieces,
     required this.onPieceSelected,
     required this.onPieceRotated,
-    this.isHorizontal = false, // デフォルトは縦向き
+    this.isHorizontal = false,
   });
 
   @override
@@ -40,8 +41,8 @@ class _PieceTrayWidgetState extends State<PieceTrayWidget> {
             color: Colors.black.withOpacity(0.1),
             blurRadius: 8,
             offset: widget.isHorizontal
-                ? const Offset(0, -2) // 横向き時は上向きの影
-                : const Offset(0, 4), // 縦向き時は下向きの影
+                ? const Offset(0, -2)
+                : const Offset(0, 4),
           ),
         ],
       ),
@@ -51,7 +52,7 @@ class _PieceTrayWidgetState extends State<PieceTrayWidget> {
     );
   }
 
-  /// 🔥 新機能：横向きレイアウト（下部配置用）
+  /// 横向きレイアウト（下部配置用）
   Widget _buildHorizontalLayout(List<PuzzlePiece> unplacedPieces) {
     return Column(
       children: [
@@ -111,7 +112,7 @@ class _PieceTrayWidgetState extends State<PieceTrayWidget> {
     );
   }
 
-  /// 既存の縦向きレイアウト
+  /// 縦向きレイアウト
   Widget _buildVerticalLayout(List<PuzzlePiece> unplacedPieces) {
     return Column(
       children: [
@@ -158,7 +159,7 @@ class _PieceTrayWidgetState extends State<PieceTrayWidget> {
     );
   }
 
-  /// 🔥 新機能：横向きピースアイテム
+  /// 🔥 改善：横向きピースアイテム（正確なドラッグ）
   Widget _buildHorizontalPieceItem(PuzzlePiece piece) {
     const cellSize = 16.0;
     final isSelected = piece.id == _selectedPieceId;
@@ -178,49 +179,11 @@ class _PieceTrayWidgetState extends State<PieceTrayWidget> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          // ピースプレビュー
+          // 🔥 改善：正確なドラッグ可能ピースプレビュー
           Expanded(
             child: GestureDetector(
               onTap: () => _selectPiece(piece.id),
-              child: Draggable<String>(
-                data: piece.id,
-                dragAnchorStrategy: pointerDragAnchorStrategy,
-
-                onDragStarted: () {
-                  print('🚀 横向きトレイからドラッグ開始: ${piece.id}');
-                  _selectPiece(piece.id);
-                },
-
-                onDragEnd: (details) {
-                  print('🏁 横向きトレイドラッグ終了: ${piece.id}');
-                },
-
-                feedback: Material(
-                  color: Colors.transparent,
-                  child: Transform.scale(
-                    scale: 1.5,
-                    child: Container(
-                      decoration: BoxDecoration(
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withOpacity(0.3),
-                            blurRadius: 8,
-                            offset: const Offset(2, 2),
-                          ),
-                        ],
-                      ),
-                      child: _buildPiecePreview(piece, cellSize * 2),
-                    ),
-                  ),
-                ),
-
-                childWhenDragging: Opacity(
-                  opacity: 0.3,
-                  child: _buildPiecePreview(piece, cellSize),
-                ),
-
-                child: _buildPiecePreview(piece, cellSize),
-              ),
+              child: _buildAccurateDraggable(piece, cellSize),
             ),
           ),
 
@@ -228,7 +191,10 @@ class _PieceTrayWidgetState extends State<PieceTrayWidget> {
 
           // 回転ボタン
           GestureDetector(
-            onTap: () => widget.onPieceRotated(piece.id),
+            onTap: () {
+              widget.onPieceRotated(piece.id);
+              HapticFeedback.selectionClick();
+            },
             child: Container(
               padding: const EdgeInsets.all(4),
               decoration: BoxDecoration(
@@ -243,7 +209,7 @@ class _PieceTrayWidgetState extends State<PieceTrayWidget> {
     );
   }
 
-  /// 既存の縦向きピースアイテム
+  /// 縦向きピースアイテム
   Widget _buildVerticalPieceItem(PuzzlePiece piece) {
     final isSelected = piece.id == _selectedPieceId;
     const cellSize = 20.0;
@@ -262,54 +228,17 @@ class _PieceTrayWidgetState extends State<PieceTrayWidget> {
           padding: const EdgeInsets.all(12),
           child: Row(
             children: [
-              // ドラッグ可能なピースプレビュー
-              Expanded(
-                child: Draggable<String>(
-                  data: piece.id,
-                  dragAnchorStrategy: pointerDragAnchorStrategy,
-
-                  onDragStarted: () {
-                    print('🚀 縦向きトレイからドラッグ開始: ${piece.id}');
-                    _selectPiece(piece.id);
-                  },
-
-                  onDragEnd: (details) {
-                    print('🏁 縦向きトレイドラッグ終了: ${piece.id}');
-                  },
-
-                  feedback: Material(
-                    color: Colors.transparent,
-                    child: Transform.scale(
-                      scale: 1.2,
-                      child: Container(
-                        decoration: BoxDecoration(
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.black.withOpacity(0.3),
-                              blurRadius: 8,
-                              offset: const Offset(2, 2),
-                            ),
-                          ],
-                        ),
-                        child: _buildPiecePreview(piece, cellSize * 1.5),
-                      ),
-                    ),
-                  ),
-
-                  childWhenDragging: Opacity(
-                    opacity: 0.3,
-                    child: _buildPiecePreview(piece, cellSize),
-                  ),
-
-                  child: _buildPiecePreview(piece, cellSize),
-                ),
-              ),
+              // 🔥 改善：正確なドラッグ可能エリア
+              Expanded(child: _buildAccurateDraggable(piece, cellSize)),
 
               const SizedBox(width: 8),
 
               // 回転ボタン
               IconButton(
-                onPressed: () => widget.onPieceRotated(piece.id),
+                onPressed: () {
+                  widget.onPieceRotated(piece.id);
+                  HapticFeedback.selectionClick();
+                },
                 icon: const Icon(Icons.rotate_right),
                 iconSize: 20,
                 style: IconButton.styleFrom(
@@ -326,8 +255,81 @@ class _PieceTrayWidgetState extends State<PieceTrayWidget> {
     );
   }
 
-  /// ピースプレビュー作成
-  Widget _buildPiecePreview(PuzzlePiece piece, double cellSize) {
+  /// 🔥 新機能：正確なドラッグ可能ウィジェット
+  Widget _buildAccurateDraggable(PuzzlePiece piece, double cellSize) {
+    return Draggable<String>(
+      data: piece.id,
+
+      // 🔥 重要：ドラッグアンカーストラテジー
+      dragAnchorStrategy: (draggable, context, position) {
+        // ピースの中心を基準にドラッグ
+        final RenderBox renderBox = context.findRenderObject() as RenderBox;
+        final size = renderBox.size;
+        return Offset(size.width / 2, size.height / 2);
+      },
+
+      onDragStarted: () {
+        print('🚀 正確なドラッグ開始: ${piece.id}');
+        _selectPiece(piece.id);
+        HapticFeedback.lightImpact();
+      },
+
+      onDragEnd: (details) {
+        print('🏁 正確なドラッグ終了: ${piece.id}');
+        print('   終了位置: ${details.offset}');
+        print('   速度: ${details.velocity}');
+      },
+
+      onDragUpdate: (details) {
+        // ドラッグ中の座標をログ出力（デバッグ用）
+        if (false) {
+          // デバッグ時のみ有効
+          print('📱 ドラッグ更新: ${details.globalPosition}');
+        }
+      },
+
+      // 🔥 改善：より大きく見やすいフィードバック
+      feedback: Material(
+        color: Colors.transparent,
+        child: Transform.scale(
+          scale: widget.isHorizontal ? 2.0 : 1.5, // 横向きの場合はより大きく
+          child: Container(
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(8),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.4),
+                  blurRadius: 12,
+                  offset: const Offset(0, 4),
+                ),
+              ],
+            ),
+            child: _buildEnhancedPiecePreview(
+              piece,
+              cellSize * (widget.isHorizontal ? 1.5 : 1.2),
+              isFloating: true,
+            ),
+          ),
+        ),
+      ),
+
+      // ドラッグ中の元の位置表示
+      childWhenDragging: Opacity(
+        opacity: 0.3,
+        child: _buildEnhancedPiecePreview(piece, cellSize),
+      ),
+
+      // 通常時の表示
+      child: _buildEnhancedPiecePreview(piece, cellSize),
+    );
+  }
+
+  /// 🎨 強化されたピースプレビュー
+  Widget _buildEnhancedPiecePreview(
+    PuzzlePiece piece,
+    double cellSize, {
+    bool isFloating = false,
+  }) {
     final rotatedCells = piece.getRotatedCells();
     if (rotatedCells.isEmpty) return const SizedBox.shrink();
 
@@ -339,22 +341,23 @@ class _PieceTrayWidgetState extends State<PieceTrayWidget> {
     final width = (maxX - minX + 1) * cellSize;
     final height = (maxY - minY + 1) * cellSize;
 
-    // 🔧 改善：最小・最大サイズを制限
+    // サイズ制限
     final constrainedWidth = widget.isHorizontal
-        ? width.clamp(24.0, 64.0)
+        ? width.clamp(24.0, 80.0)
         : width.clamp(40.0, 120.0);
     final constrainedHeight = widget.isHorizontal
-        ? height.clamp(24.0, 64.0)
+        ? height.clamp(24.0, 80.0)
         : height.clamp(40.0, 120.0);
 
-    return SizedBox(
+    return Container(
       width: constrainedWidth,
       height: constrainedHeight,
       child: CustomPaint(
-        painter: PiecePainter(
+        painter: _EnhancedPiecePainter(
           piece: piece,
           cellSize: cellSize,
           isSelected: piece.id == _selectedPieceId,
+          isFloating: isFloating,
         ),
       ),
     );
@@ -391,5 +394,103 @@ class _PieceTrayWidgetState extends State<PieceTrayWidget> {
       _selectedPieceId = _selectedPieceId == pieceId ? null : pieceId;
     });
     widget.onPieceSelected(pieceId);
+  }
+}
+
+/// 🎨 強化されたピースペインター
+class _EnhancedPiecePainter extends CustomPainter {
+  final PuzzlePiece piece;
+  final double cellSize;
+  final bool isSelected;
+  final bool isFloating;
+
+  const _EnhancedPiecePainter({
+    required this.piece,
+    required this.cellSize,
+    required this.isSelected,
+    this.isFloating = false,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint();
+    final cells = piece.getRotatedCells();
+
+    if (cells.isEmpty) return;
+
+    // 最小座標を基準にする
+    final minX = cells.map((c) => c.x).reduce((a, b) => a < b ? a : b);
+    final minY = cells.map((c) => c.y).reduce((a, b) => a < b ? a : b);
+
+    for (final cell in cells) {
+      final rect = Rect.fromLTWH(
+        (cell.x - minX) * cellSize,
+        (cell.y - minY) * cellSize,
+        cellSize,
+        cellSize,
+      );
+
+      // 🎨 改善：グラデーション効果
+      if (isFloating) {
+        // フローティング時は特別なエフェクト
+        paint
+          ..shader = LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              piece.color.withOpacity(0.9),
+              piece.color.withOpacity(0.7),
+            ],
+          ).createShader(rect)
+          ..style = PaintingStyle.fill;
+      } else {
+        // 通常時
+        paint
+          ..color = piece.color.withOpacity(isSelected ? 0.9 : 0.8)
+          ..style = PaintingStyle.fill;
+      }
+
+      final rrect = RRect.fromRectAndRadius(rect, const Radius.circular(4));
+      canvas.drawRRect(rrect, paint);
+
+      // 境界線
+      paint
+        ..shader = null
+        ..color = isSelected
+            ? piece.color.withOpacity(1.0)
+            : piece.color.withOpacity(0.8)
+        ..strokeWidth = isSelected ? 2.0 : 1.5
+        ..style = PaintingStyle.stroke;
+
+      canvas.drawRRect(rrect, paint);
+
+      // ハイライト効果
+      if (isSelected || isFloating) {
+        paint
+          ..color = Colors.white.withOpacity(0.4)
+          ..style = PaintingStyle.fill;
+
+        final highlightRect = Rect.fromLTWH(
+          (cell.x - minX) * cellSize + 2,
+          (cell.y - minY) * cellSize + 2,
+          cellSize - 4,
+          cellSize * 0.3,
+        );
+
+        final highlightRRect = RRect.fromRectAndRadius(
+          highlightRect,
+          const Radius.circular(2),
+        );
+        canvas.drawRRect(highlightRRect, paint);
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(_EnhancedPiecePainter oldDelegate) {
+    return oldDelegate.piece != piece ||
+        oldDelegate.cellSize != cellSize ||
+        oldDelegate.isSelected != isSelected ||
+        oldDelegate.isFloating != isFloating;
   }
 }

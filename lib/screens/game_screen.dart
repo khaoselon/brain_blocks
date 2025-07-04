@@ -1,4 +1,4 @@
-// lib/screens/game_screen.dart - レイアウト改善版（ピーストレイを下部に配置）
+// lib/screens/game_screen.dart - ドラッグ&ドロップ対応版
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -71,17 +71,14 @@ class _GameScreenState extends ConsumerState<GameScreen>
       body: SafeArea(
         child: LayoutBuilder(
           builder: (context, constraints) {
-            // 🔧 改善：レスポンシブレイアウト
+            // 🔧 改善：画面サイズに応じたレイアウト選択
             final isLandscape = constraints.maxWidth > constraints.maxHeight;
-            final screenHeight = constraints.maxHeight;
             final screenWidth = constraints.maxWidth;
 
-            // 画面サイズに応じてレイアウトを調整
+            // 大きな横画面の場合は従来レイアウト、それ以外は新レイアウト
             if (isLandscape && screenWidth > 800) {
-              // 大きな横画面：従来の横並びレイアウト
               return _buildLandscapeLayout(gameState, constraints);
             } else {
-              // 縦画面・小さな横画面：新しい縦並びレイアウト
               return _buildPortraitLayout(gameState, constraints);
             }
           },
@@ -90,24 +87,18 @@ class _GameScreenState extends ConsumerState<GameScreen>
     );
   }
 
-  /// 🎨 新しい縦並びレイアウト（ピーストレイ下部配置）
+  /// 🎨 新しい縦並びレイアウト（メイン）
   Widget _buildPortraitLayout(GameState gameState, BoxConstraints constraints) {
     final screenHeight = constraints.maxHeight;
-    final screenWidth = constraints.maxWidth;
 
-    // レイアウト比率を計算
-    final headerHeight = 80.0; // ゲームヘッダーの高さ
-    final trayHeight = (screenHeight * 0.25).clamp(
-      120.0,
-      200.0,
-    ); // ピーストレイの高さ（画面の25%、最小120px、最大200px）
-    final boardHeight =
-        screenHeight - headerHeight - trayHeight - 32; // 余白を考慮したゲーム盤面の高さ
+    // レイアウト比率を動的計算
+    final headerHeight = 90.0;
+    final trayHeight = (screenHeight * 0.22).clamp(140.0, 220.0);
 
     return Column(
       children: [
         // ゲームヘッダー
-        SizedBox(
+        Container(
           height: headerHeight,
           child: GameHeaderWidget(
             gameState: gameState,
@@ -116,30 +107,38 @@ class _GameScreenState extends ConsumerState<GameScreen>
           ),
         ),
 
-        const SizedBox(height: 16),
+        const SizedBox(height: 8),
 
-        // メインゲーム盤面
+        // 🔥 改善：メインゲーム盤面（最大化）
         Expanded(
           child: Container(
             margin: const EdgeInsets.symmetric(horizontal: 16),
             child: Center(
-              child: GameBoardWidget(
-                gameState: gameState,
-                hintPieceId: _hintPieceId,
-                hintAnimation: _hintAnimationController,
-                onPiecePlaced: _onPiecePlaced,
+              child: AspectRatio(
+                aspectRatio: 1.0, // 正方形を保持
+                child: GameBoardWidget(
+                  gameState: gameState,
+                  hintPieceId: _hintPieceId,
+                  hintAnimation: _hintAnimationController,
+                  onPiecePlaced: _onPiecePlaced,
+                ),
               ),
             ),
           ),
         ),
 
-        const SizedBox(height: 16),
+        const SizedBox(height: 8),
 
-        // 🔥 新機能：ピーストレイを下部に配置
+        // 🔥 改善：下部ピーストレイ（横スクロール）
         Container(
           height: trayHeight,
           margin: const EdgeInsets.symmetric(horizontal: 16),
-          child: _buildBottomPieceTray(gameState),
+          child: PieceTrayWidget(
+            pieces: gameState.pieces,
+            onPieceSelected: _onPieceSelected,
+            onPieceRotated: _onPieceRotated,
+            isHorizontal: true, // 🔥 重要：横向きレイアウト
+          ),
         ),
 
         const SizedBox(height: 16),
@@ -147,7 +146,7 @@ class _GameScreenState extends ConsumerState<GameScreen>
     );
   }
 
-  /// 🎨 横画面レイアウト（大画面用：従来通り）
+  /// 🎨 横画面レイアウト（大画面用）
   Widget _buildLandscapeLayout(
     GameState gameState,
     BoxConstraints constraints,
@@ -188,6 +187,7 @@ class _GameScreenState extends ConsumerState<GameScreen>
                   pieces: gameState.pieces,
                   onPieceSelected: _onPieceSelected,
                   onPieceRotated: _onPieceRotated,
+                  isHorizontal: false, // 縦向きレイアウト
                 ),
               ),
             ],
@@ -196,202 +196,6 @@ class _GameScreenState extends ConsumerState<GameScreen>
 
         const SizedBox(height: 16),
       ],
-    );
-  }
-
-  /// 🔥 新機能：下部ピーストレイ
-  Widget _buildBottomPieceTray(GameState gameState) {
-    final unplacedPieces = gameState.pieces.where((p) => !p.isPlaced).toList();
-
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.1),
-            blurRadius: 8,
-            offset: const Offset(0, -2), // 上向きの影
-          ),
-        ],
-      ),
-      child: Column(
-        children: [
-          // ヘッダー
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            decoration: const BoxDecoration(
-              color: Color(0xFF2E86C1),
-              borderRadius: BorderRadius.only(
-                topLeft: Radius.circular(12),
-                topRight: Radius.circular(12),
-              ),
-            ),
-            child: Row(
-              children: [
-                const Icon(Icons.extension, color: Colors.white, size: 20),
-                const SizedBox(width: 8),
-                Text(
-                  'ピース (${unplacedPieces.length})',
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 14,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                const Spacer(),
-                if (unplacedPieces.isNotEmpty)
-                  Text(
-                    '左右にスクロール',
-                    style: TextStyle(
-                      color: Colors.white.withOpacity(0.8),
-                      fontSize: 12,
-                    ),
-                  ),
-              ],
-            ),
-          ),
-
-          // ピース一覧（横スクロール）
-          Expanded(
-            child: unplacedPieces.isEmpty
-                ? const Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(
-                          Icons.check_circle_outline,
-                          size: 32,
-                          color: Colors.green,
-                        ),
-                        SizedBox(height: 4),
-                        Text(
-                          '全ピース配置完了！',
-                          style: TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.green,
-                          ),
-                        ),
-                      ],
-                    ),
-                  )
-                : SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    padding: const EdgeInsets.all(12),
-                    child: Row(
-                      children: unplacedPieces.map((piece) {
-                        return Container(
-                          margin: const EdgeInsets.only(right: 12),
-                          child: _buildBottomPieceItem(piece),
-                        );
-                      }).toList(),
-                    ),
-                  ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  /// 🔥 新機能：下部ピースアイテム
-  Widget _buildBottomPieceItem(PuzzlePiece piece) {
-    const cellSize = 16.0;
-
-    return Container(
-      padding: const EdgeInsets.all(8),
-      decoration: BoxDecoration(
-        color: piece.color.withOpacity(0.1),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: piece.color.withOpacity(0.3)),
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          // ピースプレビュー
-          Expanded(
-            child: Draggable<String>(
-              data: piece.id,
-              dragAnchorStrategy: pointerDragAnchorStrategy,
-
-              onDragStarted: () {
-                print('🚀 下部トレイからドラッグ開始: ${piece.id}');
-                HapticFeedback.lightImpact();
-              },
-
-              onDragEnd: (details) {
-                print('🏁 下部トレイドラッグ終了: ${piece.id}');
-              },
-
-              feedback: Material(
-                color: Colors.transparent,
-                child: Transform.scale(
-                  scale: 1.5,
-                  child: Container(
-                    decoration: BoxDecoration(
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withOpacity(0.3),
-                          blurRadius: 8,
-                          offset: const Offset(2, 2),
-                        ),
-                      ],
-                    ),
-                    child: _buildPiecePreview(piece, cellSize * 2),
-                  ),
-                ),
-              ),
-
-              childWhenDragging: Opacity(
-                opacity: 0.3,
-                child: _buildPiecePreview(piece, cellSize),
-              ),
-
-              child: _buildPiecePreview(piece, cellSize),
-            ),
-          ),
-
-          const SizedBox(height: 4),
-
-          // 回転ボタン
-          GestureDetector(
-            onTap: () {
-              _onPieceRotated(piece.id);
-              HapticFeedback.selectionClick();
-            },
-            child: Container(
-              padding: const EdgeInsets.all(4),
-              decoration: BoxDecoration(
-                color: piece.color.withOpacity(0.2),
-                shape: BoxShape.circle,
-              ),
-              child: Icon(Icons.rotate_right, size: 16, color: piece.color),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  /// ピースプレビュー作成
-  Widget _buildPiecePreview(PuzzlePiece piece, double cellSize) {
-    final rotatedCells = piece.getRotatedCells();
-    if (rotatedCells.isEmpty) return const SizedBox.shrink();
-
-    final minX = rotatedCells.map((c) => c.x).reduce((a, b) => a < b ? a : b);
-    final minY = rotatedCells.map((c) => c.y).reduce((a, b) => a < b ? a : b);
-    final maxX = rotatedCells.map((c) => c.x).reduce((a, b) => a > b ? a : b);
-    final maxY = rotatedCells.map((c) => c.y).reduce((a, b) => a > b ? a : b);
-
-    final width = (maxX - minX + 1) * cellSize;
-    final height = (maxY - minY + 1) * cellSize;
-
-    return Container(
-      width: width.clamp(32.0, 80.0), // 最小・最大サイズを制限
-      height: height.clamp(32.0, 80.0),
-      child: CustomPaint(
-        painter: _SimplePiecePainter(piece: piece, cellSize: cellSize),
-      ),
     );
   }
 
@@ -435,18 +239,47 @@ class _GameScreenState extends ConsumerState<GameScreen>
     );
   }
 
+  /// 🔧 改善：ピース配置処理
   void _onPiecePlaced(String pieceId, PiecePosition position) {
-    ref.read(gameStateProvider.notifier).placePiece(pieceId, position);
-    HapticFeedback.lightImpact();
+    print('🎯 ピース配置コールバック: $pieceId at $position');
+
+    try {
+      ref.read(gameStateProvider.notifier).placePiece(pieceId, position);
+      HapticFeedback.lightImpact();
+
+      // 配置成功のフィードバック
+      _showPlacementSuccess();
+    } catch (e) {
+      print('❌ ピース配置エラー: $e');
+      HapticFeedback.mediumImpact();
+    }
   }
 
   void _onPieceSelected(String pieceId) {
-    // ピース選択時の処理
+    // ピース選択時の処理（必要に応じて実装）
+    print('🎯 ピース選択: $pieceId');
   }
 
   void _onPieceRotated(String pieceId) {
     ref.read(gameStateProvider.notifier).rotatePiece(pieceId);
     HapticFeedback.selectionClick();
+
+    // 回転フィードバック
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: const Text('ピースを回転しました'),
+        duration: const Duration(milliseconds: 500),
+        backgroundColor: const Color(0xFF2E86C1),
+        behavior: SnackBarBehavior.floating,
+        margin: const EdgeInsets.only(bottom: 200, left: 20, right: 20),
+      ),
+    );
+  }
+
+  /// 🎉 配置成功時のフィードバック
+  void _showPlacementSuccess() {
+    // 軽微な成功フィードバック（オプション）
+    // 必要に応じて実装
   }
 
   void _useHint() async {
@@ -578,47 +411,3 @@ class _GameScreenState extends ConsumerState<GameScreen>
 final admobServiceProvider = Provider<AdMobService>((ref) {
   return AdMobService.instance;
 });
-
-/// シンプルなピースペインター
-class _SimplePiecePainter extends CustomPainter {
-  final PuzzlePiece piece;
-  final double cellSize;
-
-  const _SimplePiecePainter({required this.piece, required this.cellSize});
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint();
-    final cells = piece.getRotatedCells();
-
-    for (final cell in cells) {
-      final rect = Rect.fromLTWH(
-        cell.x * cellSize,
-        cell.y * cellSize,
-        cellSize,
-        cellSize,
-      );
-
-      // 塗りつぶし
-      paint
-        ..color = piece.color
-        ..style = PaintingStyle.fill;
-
-      final rrect = RRect.fromRectAndRadius(rect, const Radius.circular(2));
-      canvas.drawRRect(rrect, paint);
-
-      // 境界線
-      paint
-        ..color = piece.color.withOpacity(0.8)
-        ..strokeWidth = 1.0
-        ..style = PaintingStyle.stroke;
-
-      canvas.drawRRect(rrect, paint);
-    }
-  }
-
-  @override
-  bool shouldRepaint(_SimplePiecePainter oldDelegate) {
-    return oldDelegate.piece != piece || oldDelegate.cellSize != cellSize;
-  }
-}

@@ -1,26 +1,193 @@
-// lib/services/puzzle_generator.dart - 完成可能性を保証する改善版
+// lib/services/puzzle_generator.dart - 高度な形状対応版
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:uuid/uuid.dart';
 import '../models/puzzle_piece.dart';
 
-/// パズルピース生成サービス（完成保証版）
+/// 高度なパズルピース生成サービス
 class PuzzleGenerator {
   static const _uuid = Uuid();
   static final _random = Random();
 
-  /// メインの生成メソッド（完成可能性を保証）
+  /// 🎯 ピース形状テンプレート定義
+  static final Map<String, List<List<String>>> _pieceTemplates = {
+    // 基本形状
+    'square_1x1': [
+      ['1'],
+    ],
+    'square_2x2': [
+      ['1', '2'],
+      ['3', '4'],
+    ],
+    'rect_1x2': [
+      ['1', '2'],
+    ],
+    'rect_2x1': [
+      ['1'],
+      ['2'],
+    ],
+    'rect_1x3': [
+      ['1', '2', '3'],
+    ],
+    'rect_3x1': [
+      ['1'],
+      ['2'],
+      ['3'],
+    ],
+    'rect_2x3': [
+      ['1', '2', '3'],
+      ['4', '5', '6'],
+    ],
+
+    // L字形状
+    'L_small': [
+      ['1', ' '],
+      ['2', '3'],
+    ],
+    'L_medium': [
+      ['1', ' ', ' '],
+      ['2', '3', '4'],
+    ],
+    'L_large': [
+      ['1', ' ', ' '],
+      ['2', ' ', ' '],
+      ['3', '4', '5'],
+    ],
+    'L_reverse': [
+      [' ', '1'],
+      ['3', '2'],
+    ],
+
+    // T字形状
+    'T_small': [
+      ['1', '2', '3'],
+      [' ', '4', ' '],
+    ],
+    'T_medium': [
+      ['1', '2', '3'],
+      [' ', '4', ' '],
+      [' ', '5', ' '],
+    ],
+    'T_upside_down': [
+      [' ', '1', ' '],
+      ['2', '3', '4'],
+    ],
+
+    // ＋字形状
+    'plus_small': [
+      [' ', '1', ' '],
+      ['2', '3', '4'],
+      [' ', '5', ' '],
+    ],
+    'plus_large': [
+      [' ', ' ', '1', ' ', ' '],
+      [' ', ' ', '2', ' ', ' '],
+      ['3', '4', '5', '6', '7'],
+      [' ', ' ', '8', ' ', ' '],
+      [' ', ' ', '9', ' ', ' '],
+    ],
+
+    // Z/S字形状
+    'Z_shape': [
+      ['1', '2', ' '],
+      [' ', '3', '4'],
+    ],
+    'S_shape': [
+      [' ', '1', '2'],
+      ['3', '4', ' '],
+    ],
+
+    // 特殊形状
+    'stairs': [
+      ['1', ' ', ' '],
+      ['2', '3', ' '],
+      [' ', '4', '5'],
+    ],
+    'corner': [
+      ['1', '2'],
+      ['3', ' '],
+      ['4', ' '],
+    ],
+    'U_shape': [
+      ['1', ' ', '2'],
+      ['3', '4', '5'],
+    ],
+    'hook': [
+      ['1', '2', '3'],
+      ['4', ' ', ' '],
+      ['5', ' ', ' '],
+    ],
+
+    // 大きな形状（10×10用）
+    'big_L': [
+      ['1', ' ', ' ', ' '],
+      ['2', ' ', ' ', ' '],
+      ['3', ' ', ' ', ' '],
+      ['4', '5', '6', '7'],
+    ],
+    'big_T': [
+      ['1', '2', '3', '4', '5'],
+      [' ', ' ', '6', ' ', ' '],
+      [' ', ' ', '7', ' ', ' '],
+    ],
+    'cross': [
+      [' ', '1', ' '],
+      ['2', '3', '4'],
+      [' ', '5', ' '],
+      [' ', '6', ' '],
+    ],
+  };
+
+  /// 🎯 難易度別の推奨ピース組み合わせ
+  static final Map<int, Map<String, int>> _difficultyPresets = {
+    // 5×5 = 25セル
+    5: {
+      'square_2x2': 2, // 8セル
+      'L_small': 2, // 6セル
+      'T_small': 1, // 4セル
+      'rect_1x3': 1, // 3セル
+      'rect_2x1': 2, // 4セル
+    },
+
+    // 7×7 = 49セル
+    7: {
+      'square_2x2': 2, // 8セル
+      'L_medium': 2, // 8セル
+      'T_medium': 2, // 10セル
+      'plus_small': 1, // 5セル
+      'Z_shape': 2, // 8セル
+      'rect_2x3': 1, // 6セル
+      'rect_2x1': 2, // 4セル
+    },
+
+    // 10×10 = 100セル
+    10: {
+      'big_L': 1, // 7セル
+      'big_T': 1, // 7セル
+      'plus_large': 1, // 9セル
+      'L_large': 2, // 10セル
+      'T_medium': 3, // 15セル
+      'square_2x2': 3, // 12セル
+      'rect_2x3': 3, // 18セル
+      'stairs': 2, // 10セル
+      'hook': 2, // 10セル
+      'rect_1x2': 1, // 2セル
+    },
+  };
+
+  /// 🎮 メインの生成メソッド
   static List<PuzzlePiece> generatePuzzle({required int gridSize, int? seed}) {
     if (seed != null) {
-      // シードが指定された場合はランダムを初期化
+      // シード設定（テスト用）
     }
 
-    // 最大試行回数を設定して確実に完成可能なパズルを生成
+    // 最大10回の試行で完成可能なパズルを生成
     for (int attempt = 0; attempt < 10; attempt++) {
       try {
-        final pieces = _generateValidPuzzle(gridSize);
+        final pieces = _generateAdvancedPuzzle(gridSize);
         if (_validatePuzzleCompleteness(pieces, gridSize)) {
-          print('✅ 完成可能なパズル生成成功 (試行回数: ${attempt + 1})');
+          print('✅ 高度なパズル生成成功 (試行回数: ${attempt + 1}, ピース数: ${pieces.length})');
+          _printPuzzleStats(pieces, gridSize);
           return pieces;
         }
       } catch (e) {
@@ -28,189 +195,311 @@ class PuzzleGenerator {
       }
     }
 
-    // フォールバック: シンプルな確実に完成可能なパズル
-    print('🔄 フォールバック: シンプルパズルを生成');
-    return _generateSimplePuzzle(gridSize);
+    // フォールバック
+    print('🔄 フォールバック: ランダムパズルを生成');
+    return _generateRandomPuzzle(gridSize);
   }
 
-  /// 確実に完成可能なパズル生成
-  static List<PuzzlePiece> _generateValidPuzzle(int gridSize) {
-    // 1. 全マスを確実にカバーする領域分割
-    final grid = List.generate(
-      gridSize,
-      (_) => List.generate(gridSize, (_) => -1),
-    );
+  /// 🔧 高度なパズル生成
+  static List<PuzzlePiece> _generateAdvancedPuzzle(int gridSize) {
+    // 基本セット + ランダム追加の組み合わせ
+    final useRandomGeneration = _random.nextBool();
 
-    final regions = <List<PiecePosition>>[];
-
-    // 改良された分割アルゴリズム
-    _improvedDivideGrid(
-      grid: grid,
-      regions: regions,
-      x: 0,
-      y: 0,
-      width: gridSize,
-      height: gridSize,
-      regionId: 0,
-    );
-
-    // 2. 全マスがカバーされているか検証
-    if (!_validateGridCoverage(grid, gridSize)) {
-      throw Exception('グリッドの完全カバレッジ失敗');
+    if (useRandomGeneration) {
+      return _generateRandomCombination(gridSize);
+    } else {
+      return _generatePresetCombination(gridSize);
     }
+  }
 
-    // 3. 各領域をピースに変換
+  /// 🎲 ランダム組み合わせ生成
+  static List<PuzzlePiece> _generateRandomCombination(int gridSize) {
+    final targetCells = gridSize * gridSize;
     final pieces = <PuzzlePiece>[];
-    final colors = _generateColors(regions.length);
+    int usedCells = 0;
 
-    for (int i = 0; i < regions.length; i++) {
-      if (regions[i].isNotEmpty) {
-        final piece = _createPieceFromRegion(regions[i], colors[i]);
-        pieces.add(piece);
+    // 利用可能なテンプレートをフィルタリング
+    final availableTemplates = _filterTemplatesBySize(gridSize);
+    final colors = _generateColors(20); // 十分な数の色を用意
+    int colorIndex = 0;
+
+    while (usedCells < targetCells && pieces.length < 15) {
+      // 最大15ピース
+      final remainingCells = targetCells - usedCells;
+
+      // 残りセル数に適したテンプレートを選択
+      final suitableTemplates = availableTemplates.entries
+          .where((entry) => _countCells(entry.value) <= remainingCells)
+          .toList();
+
+      if (suitableTemplates.isEmpty) {
+        // 小さなピースで埋める
+        final cellsNeeded = remainingCells;
+        if (cellsNeeded >= 4) {
+          pieces.add(
+            _createPieceFromTemplate(
+              'square_2x2',
+              _pieceTemplates['square_2x2']!,
+              colors[colorIndex % colors.length],
+            ),
+          );
+          usedCells += 4;
+        } else if (cellsNeeded >= 2) {
+          pieces.add(
+            _createPieceFromTemplate(
+              'rect_1x2',
+              _pieceTemplates['rect_1x2']!,
+              colors[colorIndex % colors.length],
+            ),
+          );
+          usedCells += 2;
+        } else {
+          pieces.add(
+            _createPieceFromTemplate(
+              'square_1x1',
+              _pieceTemplates['square_1x1']!,
+              colors[colorIndex % colors.length],
+            ),
+          );
+          usedCells += 1;
+        }
+        break;
       }
+
+      // ランダムにテンプレートを選択
+      final selectedTemplate =
+          suitableTemplates[_random.nextInt(suitableTemplates.length)];
+      final templateName = selectedTemplate.key;
+      final template = selectedTemplate.value;
+      final cellCount = _countCells(template);
+
+      pieces.add(
+        _createPieceFromTemplate(
+          templateName,
+          template,
+          colors[colorIndex % colors.length],
+        ),
+      );
+
+      usedCells += cellCount;
+      colorIndex++;
     }
 
-    // 4. ピース配置可能性を検証
-    if (!_validatePiecePlacement(pieces, gridSize)) {
-      throw Exception('ピース配置可能性検証失敗');
+    // セル数の調整
+    if (usedCells != targetCells) {
+      return _adjustPieceCount(pieces, targetCells, colors);
     }
 
     return pieces;
   }
 
-  /// 改良されたグリッド分割（全マスを確実にカバー）
-  static void _improvedDivideGrid({
-    required List<List<int>> grid,
-    required List<List<PiecePosition>> regions,
-    required int x,
-    required int y,
-    required int width,
-    required int height,
-    required int regionId,
-  }) {
-    final totalCells = width * height;
-
-    // 小さな領域は分割しない（2-6セル）
-    if (totalCells <= 6) {
-      _createRegion(grid, regions, x, y, width, height, regionId);
-      return;
+  /// 🎯 プリセット組み合わせ生成
+  static List<PuzzlePiece> _generatePresetCombination(int gridSize) {
+    final preset = _difficultyPresets[gridSize];
+    if (preset == null) {
+      return _generateRandomCombination(gridSize);
     }
 
-    // 分割可能性をチェック
-    bool canDivideVertically = width >= 2;
-    bool canDivideHorizontally = height >= 2;
+    final pieces = <PuzzlePiece>[];
+    final colors = _generateColors(20);
+    int colorIndex = 0;
 
-    if (!canDivideVertically && !canDivideHorizontally) {
-      _createRegion(grid, regions, x, y, width, height, regionId);
-      return;
-    }
-
-    // より均等な分割を目指す
-    final shouldDivideVertically =
-        width > height || (width == height && _random.nextBool());
-
-    if (shouldDivideVertically && canDivideVertically) {
-      // 縦分割（1/3から2/3の位置で分割）
-      final minSplit = (width * 0.33).ceil();
-      final maxSplit = (width * 0.67).floor();
-      final splitX = x + minSplit + _random.nextInt(maxSplit - minSplit + 1);
-
-      _improvedDivideGrid(
-        grid: grid,
-        regions: regions,
-        x: x,
-        y: y,
-        width: splitX - x,
-        height: height,
-        regionId: regionId,
-      );
-      _improvedDivideGrid(
-        grid: grid,
-        regions: regions,
-        x: splitX,
-        y: y,
-        width: x + width - splitX,
-        height: height,
-        regionId: regions.length,
-      );
-    } else if (canDivideHorizontally) {
-      // 横分割
-      final minSplit = (height * 0.33).ceil();
-      final maxSplit = (height * 0.67).floor();
-      final splitY = y + minSplit + _random.nextInt(maxSplit - minSplit + 1);
-
-      _improvedDivideGrid(
-        grid: grid,
-        regions: regions,
-        x: x,
-        y: y,
-        width: width,
-        height: splitY - y,
-        regionId: regionId,
-      );
-      _improvedDivideGrid(
-        grid: grid,
-        regions: regions,
-        x: x,
-        y: splitY,
-        width: width,
-        height: y + height - splitY,
-        regionId: regions.length,
-      );
-    } else {
-      _createRegion(grid, regions, x, y, width, height, regionId);
-    }
-  }
-
-  /// 領域を作成（改良版）
-  static void _createRegion(
-    List<List<int>> grid,
-    List<List<PiecePosition>> regions,
-    int x,
-    int y,
-    int width,
-    int height,
-    int regionId,
-  ) {
-    final region = <PiecePosition>[];
-
-    // 全セルを領域に追加
-    for (int dy = 0; dy < height; dy++) {
-      for (int dx = 0; dx < width; dx++) {
-        final pos = PiecePosition(x + dx, y + dy);
-        region.add(pos);
-        grid[y + dy][x + dx] = regionId;
+    // プリセットに基づいてピースを生成
+    preset.forEach((templateName, count) {
+      final template = _pieceTemplates[templateName];
+      if (template != null) {
+        for (int i = 0; i < count; i++) {
+          pieces.add(
+            _createPieceFromTemplate(
+              templateName,
+              template,
+              colors[colorIndex % colors.length],
+            ),
+          );
+          colorIndex++;
+        }
       }
-    }
+    });
 
-    // 領域をリストに追加
-    if (regions.length <= regionId) {
-      regions.addAll(
-        List.generate(regionId - regions.length + 1, (_) => <PiecePosition>[]),
-      );
-    }
-    regions[regionId] = region;
+    return pieces;
   }
 
-  /// グリッドカバレッジ検証
-  static bool _validateGridCoverage(List<List<int>> grid, int gridSize) {
-    for (int y = 0; y < gridSize; y++) {
-      for (int x = 0; x < gridSize; x++) {
-        if (grid[y][x] == -1) {
-          print('❌ 未カバーのセル発見: ($x, $y)');
-          return false;
+  /// 🔧 ピースをテンプレートから作成
+  static PuzzlePiece _createPieceFromTemplate(
+    String templateName,
+    List<List<String>> template,
+    Color color,
+  ) {
+    final cells = <PiecePosition>[];
+
+    for (int y = 0; y < template.length; y++) {
+      for (int x = 0; x < template[y].length; x++) {
+        if (template[y][x].trim().isNotEmpty) {
+          cells.add(PiecePosition(x, y));
         }
       }
     }
-    return true;
+
+    return PuzzlePiece(id: _uuid.v4(), cells: cells, color: color);
   }
 
-  /// パズルの完成可能性を検証
+  /// 🔧 グリッドサイズに適したテンプレートをフィルタリング
+  static Map<String, List<List<String>>> _filterTemplatesBySize(int gridSize) {
+    return Map.fromEntries(
+      _pieceTemplates.entries.where((entry) {
+        final template = entry.value;
+        final maxWidth = template.fold<int>(
+          0,
+          (max, row) => row.length > max ? row.length : max,
+        );
+        final height = template.length;
+
+        // グリッドサイズの70%以下のサイズのテンプレートのみ使用
+        return maxWidth <= (gridSize * 0.7).ceil() &&
+            height <= (gridSize * 0.7).ceil();
+      }),
+    );
+  }
+
+  /// 🔢 テンプレートのセル数をカウント
+  static int _countCells(List<List<String>> template) {
+    int count = 0;
+    for (final row in template) {
+      for (final cell in row) {
+        if (cell.trim().isNotEmpty) {
+          count++;
+        }
+      }
+    }
+    return count;
+  }
+
+  /// 🔧 ピース数調整
+  static List<PuzzlePiece> _adjustPieceCount(
+    List<PuzzlePiece> pieces,
+    int targetCells,
+    List<Color> colors,
+  ) {
+    final currentCells = pieces.fold(
+      0,
+      (sum, piece) => sum + piece.cells.length,
+    );
+    final difference = targetCells - currentCells;
+
+    if (difference > 0) {
+      // セルが足りない場合、小さなピースを追加
+      int remaining = difference;
+      int colorIndex = pieces.length;
+
+      while (remaining > 0) {
+        if (remaining >= 4) {
+          pieces.add(
+            _createPieceFromTemplate(
+              'square_2x2',
+              _pieceTemplates['square_2x2']!,
+              colors[colorIndex % colors.length],
+            ),
+          );
+          remaining -= 4;
+        } else if (remaining >= 2) {
+          pieces.add(
+            _createPieceFromTemplate(
+              'rect_1x2',
+              _pieceTemplates['rect_1x2']!,
+              colors[colorIndex % colors.length],
+            ),
+          );
+          remaining -= 2;
+        } else {
+          pieces.add(
+            _createPieceFromTemplate(
+              'square_1x1',
+              _pieceTemplates['square_1x1']!,
+              colors[colorIndex % colors.length],
+            ),
+          );
+          remaining -= 1;
+        }
+        colorIndex++;
+      }
+    } else if (difference < 0) {
+      // セルが多すぎる場合、大きなピースを小さなピースに分割
+      // 簡単のため、最後のピースを削除して調整
+      while (pieces.isNotEmpty &&
+          pieces.fold(0, (sum, piece) => sum + piece.cells.length) >
+              targetCells) {
+        pieces.removeLast();
+      }
+
+      // 残りを埋める
+      return _adjustPieceCount(pieces, targetCells, colors);
+    }
+
+    return pieces;
+  }
+
+  /// 🎲 フォールバック用ランダムパズル
+  static List<PuzzlePiece> _generateRandomPuzzle(int gridSize) {
+    final pieces = <PuzzlePiece>[];
+    final colors = _generateColors(10);
+    final targetCells = gridSize * gridSize;
+    int usedCells = 0;
+    int colorIndex = 0;
+
+    // シンプルな組み合わせで確実に生成
+    while (usedCells < targetCells) {
+      final remaining = targetCells - usedCells;
+
+      if (remaining >= 4 && _random.nextBool()) {
+        pieces.add(
+          _createPieceFromTemplate(
+            'square_2x2',
+            _pieceTemplates['square_2x2']!,
+            colors[colorIndex % colors.length],
+          ),
+        );
+        usedCells += 4;
+      } else if (remaining >= 3 && _random.nextBool()) {
+        pieces.add(
+          _createPieceFromTemplate(
+            'L_small',
+            _pieceTemplates['L_small']!,
+            colors[colorIndex % colors.length],
+          ),
+        );
+        usedCells += 3;
+      } else if (remaining >= 2) {
+        pieces.add(
+          _createPieceFromTemplate(
+            'rect_1x2',
+            _pieceTemplates['rect_1x2']!,
+            colors[colorIndex % colors.length],
+          ),
+        );
+        usedCells += 2;
+      } else {
+        pieces.add(
+          _createPieceFromTemplate(
+            'square_1x1',
+            _pieceTemplates['square_1x1']!,
+            colors[colorIndex % colors.length],
+          ),
+        );
+        usedCells += 1;
+      }
+
+      colorIndex++;
+    }
+
+    return pieces;
+  }
+
+  /// 🔍 パズル完成可能性検証
   static bool _validatePuzzleCompleteness(
     List<PuzzlePiece> pieces,
     int gridSize,
   ) {
-    // 1. 全ピースのセル数の合計が総マス数と一致するかチェック
+    // 1. セル数チェック
     final totalCells = pieces.fold(0, (sum, piece) => sum + piece.cells.length);
     final expectedCells = gridSize * gridSize;
 
@@ -219,48 +508,68 @@ class PuzzleGenerator {
       return false;
     }
 
-    // 2. 実際に配置可能かシミュレーション
-    return _simulatePuzzleSolution(pieces, gridSize);
+    // 2. 配置シミュレーション
+    return _simulateAdvancedPlacement(pieces, gridSize);
   }
 
-  /// パズル解決シミュレーション
-  static bool _simulatePuzzleSolution(List<PuzzlePiece> pieces, int gridSize) {
+  /// 🎮 高度な配置シミュレーション
+  static bool _simulateAdvancedPlacement(
+    List<PuzzlePiece> pieces,
+    int gridSize,
+  ) {
     final board = List.generate(
       gridSize,
       (_) => List.generate(gridSize, (_) => false),
     );
 
-    // 各ピースを配置可能な位置に配置してみる
-    for (final piece in pieces) {
-      bool placed = false;
+    // バックトラッキングで全配置を試す
+    return _backtrackPlacement(pieces, 0, board, gridSize);
+  }
 
-      for (int rotation = 0; rotation < 4 && !placed; rotation++) {
-        final rotatedPiece = piece.copyWith(rotation: rotation);
-        final rotatedCells = rotatedPiece.getRotatedCells();
+  /// 🔄 バックトラッキング配置
+  static bool _backtrackPlacement(
+    List<PuzzlePiece> pieces,
+    int pieceIndex,
+    List<List<bool>> board,
+    int gridSize,
+  ) {
+    if (pieceIndex >= pieces.length) {
+      return true; // 全ピース配置完了
+    }
 
-        for (int y = 0; y < gridSize && !placed; y++) {
-          for (int x = 0; x < gridSize && !placed; x++) {
-            final position = PiecePosition(x, y);
+    final piece = pieces[pieceIndex];
 
-            if (_canPlacePieceAt(rotatedCells, position, board, gridSize)) {
-              _placePieceOnBoard(rotatedCells, position, board);
-              placed = true;
+    // 4つの回転を試す
+    for (int rotation = 0; rotation < 4; rotation++) {
+      final rotatedPiece = piece.copyWith(rotation: rotation);
+      final rotatedCells = rotatedPiece.getRotatedCells();
+
+      // 全ての位置を試す
+      for (int y = 0; y < gridSize; y++) {
+        for (int x = 0; x < gridSize; x++) {
+          final position = PiecePosition(x, y);
+
+          if (_canPlaceAdvanced(rotatedCells, position, board, gridSize)) {
+            // 配置
+            _placeOnBoard(rotatedCells, position, board, true);
+
+            // 次のピースを再帰的に配置
+            if (_backtrackPlacement(pieces, pieceIndex + 1, board, gridSize)) {
+              return true;
             }
+
+            // バックトラック
+            _placeOnBoard(rotatedCells, position, board, false);
           }
         }
       }
-
-      if (!placed) {
-        print('❌ ピース ${piece.id} の配置位置が見つかりません');
-        return false;
-      }
     }
 
-    return true;
+    return false; // このピースは配置不可能
   }
 
-  /// ピース配置可能性チェック
-  static bool _canPlacePieceAt(
+  /// 🔧 高度な配置可能性チェック
+  static bool _canPlaceAdvanced(
     List<PiecePosition> cells,
     PiecePosition position,
     List<List<bool>> board,
@@ -286,122 +595,21 @@ class PuzzleGenerator {
     return true;
   }
 
-  /// ボードにピースを配置
-  static void _placePieceOnBoard(
+  /// 🔧 ボードに配置/除去
+  static void _placeOnBoard(
     List<PiecePosition> cells,
     PiecePosition position,
     List<List<bool>> board,
+    bool place,
   ) {
     for (final cell in cells) {
       final boardX = position.x + cell.x;
       final boardY = position.y + cell.y;
-      board[boardY][boardX] = true;
+      board[boardY][boardX] = place;
     }
   }
 
-  /// ピース配置可能性を検証
-  static bool _validatePiecePlacement(List<PuzzlePiece> pieces, int gridSize) {
-    // 各ピースが少なくとも1箇所は配置可能かチェック
-    for (final piece in pieces) {
-      bool canPlace = false;
-
-      for (int rotation = 0; rotation < 4 && !canPlace; rotation++) {
-        final rotatedPiece = piece.copyWith(rotation: rotation);
-        final rotatedCells = rotatedPiece.getRotatedCells();
-
-        for (int y = 0; y < gridSize && !canPlace; y++) {
-          for (int x = 0; x < gridSize && !canPlace; x++) {
-            final position = PiecePosition(x, y);
-            final boardCells = rotatedCells
-                .map((cell) => cell + position)
-                .toList();
-
-            // 範囲内チェック
-            bool inBounds = boardCells.every(
-              (cell) =>
-                  cell.x >= 0 &&
-                  cell.x < gridSize &&
-                  cell.y >= 0 &&
-                  cell.y < gridSize,
-            );
-
-            if (inBounds) {
-              canPlace = true;
-            }
-          }
-        }
-      }
-
-      if (!canPlace) {
-        print('❌ ピース ${piece.id} は配置不可能');
-        return false;
-      }
-    }
-
-    return true;
-  }
-
-  /// フォールバック: シンプルで確実なパズル生成
-  static List<PuzzlePiece> _generateSimplePuzzle(int gridSize) {
-    final pieces = <PuzzlePiece>[];
-    final colors = _generateColors(gridSize * 2);
-    int colorIndex = 0;
-
-    // 単純な四角形ピースを生成
-    for (int y = 0; y < gridSize; y += 2) {
-      for (int x = 0; x < gridSize; x += 2) {
-        final cells = <PiecePosition>[];
-
-        // 2x2または1x1のピースを作成
-        final width = (x + 2 <= gridSize) ? 2 : 1;
-        final height = (y + 2 <= gridSize) ? 2 : 1;
-
-        for (int dy = 0; dy < height; dy++) {
-          for (int dx = 0; dx < width; dx++) {
-            if (x + dx < gridSize && y + dy < gridSize) {
-              cells.add(PiecePosition(dx, dy));
-            }
-          }
-        }
-
-        if (cells.isNotEmpty) {
-          pieces.add(
-            PuzzlePiece(
-              id: _uuid.v4(),
-              cells: cells,
-              color: colors[colorIndex % colors.length],
-            ),
-          );
-          colorIndex++;
-        }
-      }
-    }
-
-    return pieces;
-  }
-
-  /// 領域からピースを作成
-  static PuzzlePiece _createPieceFromRegion(
-    List<PiecePosition> region,
-    Color color,
-  ) {
-    if (region.isEmpty) {
-      throw Exception('Empty region cannot create piece');
-    }
-
-    // 最小座標を基準点とする
-    final minX = region.map((p) => p.x).reduce(min);
-    final minY = region.map((p) => p.y).reduce(min);
-
-    // 相対座標に変換
-    final relativeCells = region
-        .map((pos) => PiecePosition(pos.x - minX, pos.y - minY))
-        .toList();
-
-    return PuzzlePiece(id: _uuid.v4(), cells: relativeCells, color: color);
-  }
-
-  /// カラーパレット生成
+  /// 🎨 カラーパレット生成
   static List<Color> _generateColors(int count) {
     final colors = <Color>[];
 
@@ -417,13 +625,18 @@ class PuzzleGenerator {
       const Color(0xFF6C757D), // グレー
       const Color(0xFF20C997), // ティール
       const Color(0xFFFD7E14), // 明オレンジ
+      const Color(0xFF6F42C1), // インディゴ
+      const Color(0xFFE83E8C), // ピンク
+      const Color(0xFF198754), // 成功グリーン
+      const Color(0xFFFFC107), // 警告イエロー
+      const Color(0xFF0DCAF0), // 情報シアン
     ];
 
     for (int i = 0; i < count; i++) {
       if (i < baseColors.length) {
         colors.add(baseColors[i]);
       } else {
-        // 基本色を少し変化させる
+        // 基本色を変化させる
         final baseIndex = i % baseColors.length;
         final baseColor = baseColors[baseIndex];
         colors.add(_adjustColor(baseColor, i ~/ baseColors.length));
@@ -433,7 +646,7 @@ class PuzzleGenerator {
     return colors;
   }
 
-  /// 色調整（明度・彩度変更）
+  /// 🎨 色調整
   static Color _adjustColor(Color color, int variation) {
     final hsl = HSLColor.fromColor(color);
     final adjustedHue = (hsl.hue + variation * 30) % 360;
@@ -445,26 +658,41 @@ class PuzzleGenerator {
     return hsl.withHue(adjustedHue).withLightness(adjustedLightness).toColor();
   }
 
-  /// デバッグ用：グリッド表示
-  static void debugPrintGrid(List<List<int>> grid) {
-    for (final row in grid) {
-      print(row.map((cell) => cell.toString().padLeft(2)).join(' '));
-    }
-  }
-
-  /// デバッグ用：パズル統計表示
-  static void debugPrintPuzzleStats(List<PuzzlePiece> pieces, int gridSize) {
+  /// 📊 パズル統計表示
+  static void _printPuzzleStats(List<PuzzlePiece> pieces, int gridSize) {
     final totalCells = pieces.fold(0, (sum, piece) => sum + piece.cells.length);
     final expectedCells = gridSize * gridSize;
 
-    print('=== パズル統計 ===');
+    print('=== 高度パズル統計 ===');
+    print('グリッドサイズ: ${gridSize}×${gridSize} ($expectedCells セル)');
     print('ピース数: ${pieces.length}');
-    print('総セル数: $totalCells / $expectedCells');
-    print('平均ピースサイズ: ${(totalCells / pieces.length).toStringAsFixed(1)}');
+    print('総セル数: $totalCells');
+    print('平均ピースサイズ: ${(totalCells / pieces.length).toStringAsFixed(1)} セル');
 
-    for (int i = 0; i < pieces.length; i++) {
-      print('ピース${i + 1}: ${pieces[i].cells.length}セル');
+    // ピースサイズ分布
+    final sizeCounts = <int, int>{};
+    for (final piece in pieces) {
+      final size = piece.cells.length;
+      sizeCounts[size] = (sizeCounts[size] ?? 0) + 1;
     }
-    print('================');
+
+    print('サイズ分布:');
+    sizeCounts.entries.toList()
+      ..sort((a, b) => a.key.compareTo(b.key))
+      ..forEach((entry) {
+        print('  ${entry.key}セル: ${entry.value}個');
+      });
+
+    print('===================');
+  }
+
+  /// 🎲 カスタムピース追加メソッド（将来の拡張用）
+  static void addCustomTemplate(String name, List<List<String>> template) {
+    _pieceTemplates[name] = template;
+  }
+
+  /// 📝 利用可能なテンプレート一覧取得
+  static List<String> getAvailableTemplates() {
+    return _pieceTemplates.keys.toList();
   }
 }

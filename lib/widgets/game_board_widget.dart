@@ -1,4 +1,4 @@
-// lib/widgets/game_board_widget.dart - 座標ずれ修正版
+// lib/widgets/game_board_widget.dart - 完全修正版
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../models/game_state.dart';
@@ -11,6 +11,7 @@ class GameBoardWidget extends StatefulWidget {
   final String? hintPieceId;
   final AnimationController? hintAnimation;
   final Function(String pieceId, PiecePosition position) onPiecePlaced;
+  final Function(String pieceId)? onPieceRemoved;
 
   const GameBoardWidget({
     super.key,
@@ -18,20 +19,45 @@ class GameBoardWidget extends StatefulWidget {
     this.hintPieceId,
     this.hintAnimation,
     required this.onPiecePlaced,
+    this.onPieceRemoved,
   });
 
   @override
   State<GameBoardWidget> createState() => _GameBoardWidgetState();
 }
 
-class _GameBoardWidgetState extends State<GameBoardWidget> {
+class _GameBoardWidgetState extends State<GameBoardWidget>
+    with TickerProviderStateMixin {
   String? _draggedPieceId;
   PiecePosition? _currentDragPosition;
   bool _isDragActive = false;
   PuzzlePiece? _draggedPiece;
-  Offset? _dragOffset; // 🔥 新機能：実際のドラッグ座標
-  List<PiecePosition>? _previewCells;
-  GlobalKey _boardKey = GlobalKey(); // 🔥 盤面の正確な位置取得用
+  Offset? _dragOffset;
+  GlobalKey _boardKey = GlobalKey();
+
+  // 配置済みピース操作
+  String? _selectedPlacedPieceId;
+  late AnimationController _selectionAnimationController;
+
+  // 🔥 修正：ダブルタップ検出の改善
+  DateTime? _lastTapTime;
+  String? _lastTappedPieceId;
+  static const Duration _doubleTapTimeout = Duration(milliseconds: 400);
+
+  @override
+  void initState() {
+    super.initState();
+    _selectionAnimationController = AnimationController(
+      duration: const Duration(milliseconds: 1000),
+      vsync: this,
+    );
+  }
+
+  @override
+  void dispose() {
+    _selectionAnimationController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -59,14 +85,12 @@ class _GameBoardWidgetState extends State<GameBoardWidget> {
           child: ClipRRect(
             borderRadius: BorderRadius.circular(12),
             child: DragTarget<String>(
-              // 🔥 改善：より柔軟な受け入れ条件
               onWillAccept: (pieceId) {
                 if (pieceId == null || pieceId.isEmpty) return false;
                 final piece = _findPieceById(pieceId);
-                return piece != null && !piece.isPlaced;
+                return piece != null;
               },
 
-              // 🔥 改善：正確なドロップ処理
               onAccept: (pieceId) {
                 print('✅ DragTarget.onAccept: $pieceId');
                 if (_currentDragPosition != null && _draggedPiece != null) {
@@ -75,7 +99,6 @@ class _GameBoardWidgetState extends State<GameBoardWidget> {
                 _resetDragState();
               },
 
-              // 🔥 修正：正確な座標追跡
               onMove: (details) {
                 _handleDragMoveImproved(details, cellSize, gridSize);
               },
@@ -86,34 +109,54 @@ class _GameBoardWidgetState extends State<GameBoardWidget> {
               },
 
               builder: (context, candidateData, rejectedData) {
-                return Container(
-                  key: _boardKey, // 🔥 重要：盤面位置の特定用
-                  width: boardSize,
-                  height: boardSize,
-                  child: Stack(
-                    children: [
-                      // 基本ゲーム盤面
-                      CustomPaint(
-                        size: Size(boardSize, boardSize),
-                        painter: GameBoardPainter(
-                          gridSize: gridSize,
-                          pieces: widget.gameState.pieces,
-                          cellSize: cellSize,
+                return GestureDetector(
+                  onTapDown: (details) =>
+                      _handleBoardTap(details, cellSize, gridSize),
+                  child: Container(
+                    key: _boardKey,
+                    width: boardSize,
+                    height: boardSize,
+                    child: Stack(
+                      children: [
+                        // 基本ゲーム盤面
+                        CustomPaint(
+                          size: Size(boardSize, boardSize),
+                          painter: GameBoardPainter(
+                            gridSize: gridSize,
+                            pieces: widget.gameState.pieces,
+                            cellSize: cellSize,
+                            selectedPieceId: _selectedPlacedPieceId,
+                          ),
                         ),
-                      ),
 
-                      // 🔥 改善：リアルタイム配置プレビュー
-                      if (_isDragActive && _dragOffset != null)
-                        _buildRealTimePreview(cellSize, boardSize, gridSize),
+                        // 選択されたピースのアニメーション
+                        if (_selectedPlacedPieceId != null)
+                          _buildSelectedPieceAnimation(cellSize),
 
-                      // ヒント表示
-                      if (widget.hintPieceId != null &&
-                          widget.hintAnimation != null)
-                        _buildHintOverlay(cellSize),
+                        // リアルタイムプレビュー
+                        if (_isDragActive && _dragOffset != null)
+                          _buildRealTimePreview(cellSize, boardSize, gridSize),
 
-                      // デバッグ情報（開発時のみ）
-                      if (true) _buildDebugInfo(cellSize), // デバッグ用
-                    ],
+                        // ヒント表示
+                        if (widget.hintPieceId != null &&
+                            widget.hintAnimation != null)
+                          _buildHintOverlay(cellSize),
+
+                        // 🔥 改善：配置済みピース全体をドラッグ可能に
+                        ..._buildPlacedPieceDragAreas(cellSize, gridSize),
+
+                        // 🔥 新機能：ピーストレイ戻しボタン
+                        if (_selectedPlacedPieceId != null &&
+                            widget.onPieceRemoved != null)
+                          _buildRemoveButton(),
+
+                        // 操作ヘルプ
+                        _buildInteractionHelp(),
+
+                        // デバッグ情報
+                        if (false) _buildDebugInfo(cellSize), // リリース時はfalse
+                      ],
+                    ),
                   ),
                 );
               },
@@ -124,7 +167,304 @@ class _GameBoardWidgetState extends State<GameBoardWidget> {
     );
   }
 
-  /// 🔧 大幅改善：正確な座標変換処理
+  /// 🔥 修正：盤面タップ処理（ダブルタップ検出改善）
+  void _handleBoardTap(TapDownDetails details, double cellSize, int gridSize) {
+    final RenderBox? renderBox =
+        _boardKey.currentContext?.findRenderObject() as RenderBox?;
+    if (renderBox == null) return;
+
+    final localPosition = renderBox.globalToLocal(details.globalPosition);
+    final gridX = (localPosition.dx / cellSize).floor();
+    final gridY = (localPosition.dy / cellSize).floor();
+
+    if (gridX >= 0 && gridX < gridSize && gridY >= 0 && gridY < gridSize) {
+      final tappedPosition = PiecePosition(gridX, gridY);
+      final tappedPiece = _findPieceAtPosition(tappedPosition);
+
+      if (tappedPiece != null && tappedPiece.isPlaced) {
+        _handlePlacedPieceTap(tappedPiece);
+      } else {
+        _clearSelection();
+      }
+    }
+  }
+
+  /// 🔥 修正：配置済みピースタップ処理（ダブルタップ改善）
+  void _handlePlacedPieceTap(PuzzlePiece piece) {
+    final now = DateTime.now();
+
+    // 🔥 修正：より厳密なダブルタップ検出
+    final isDoubleTap =
+        _lastTapTime != null &&
+        _lastTappedPieceId == piece.id &&
+        now.difference(_lastTapTime!).inMilliseconds <
+            _doubleTapTimeout.inMilliseconds;
+
+    print('🎯 ピースタップ: ${piece.id}, ダブルタップ: $isDoubleTap');
+
+    _lastTapTime = now;
+    _lastTappedPieceId = piece.id;
+
+    if (isDoubleTap && widget.onPieceRemoved != null) {
+      // ダブルタップ: ピーストレイに戻す
+      print('🔄 ダブルタップ検出 - ピースを除去: ${piece.id}');
+      _removePieceToTray(piece.id);
+    } else {
+      // シングルタップ: 選択/選択解除
+      _selectPlacedPiece(piece.id);
+    }
+  }
+
+  /// 配置済みピース選択
+  void _selectPlacedPiece(String pieceId) {
+    setState(() {
+      if (_selectedPlacedPieceId == pieceId) {
+        _selectedPlacedPieceId = null;
+        _selectionAnimationController.stop();
+      } else {
+        _selectedPlacedPieceId = pieceId;
+        _selectionAnimationController.repeat(reverse: true);
+      }
+    });
+
+    HapticFeedback.selectionClick();
+
+    if (_selectedPlacedPieceId != null) {
+      final message = widget.onPieceRemoved != null
+          ? 'ピースを選択しました（ダブルタップで除去）'
+          : 'ピースを選択しました';
+      _showMessage(message, Colors.blue);
+    }
+  }
+
+  /// ピースをトレイに戻す
+  void _removePieceToTray(String pieceId) {
+    print('🔄 ピースをトレイに戻す: $pieceId');
+    widget.onPieceRemoved?.call(pieceId);
+    _clearSelection();
+    HapticFeedback.mediumImpact();
+    _showMessage('ピースを取り外しました', Colors.orange);
+  }
+
+  /// 選択クリア
+  void _clearSelection() {
+    setState(() {
+      _selectedPlacedPieceId = null;
+    });
+    _selectionAnimationController.stop();
+  }
+
+  /// 配置済みピースの位置取得
+  PuzzlePiece? _findPieceAtPosition(PiecePosition position) {
+    for (final piece in widget.gameState.pieces) {
+      if (piece.isPlaced) {
+        final boardCells = piece.getBoardCells();
+        if (boardCells.contains(position)) {
+          return piece;
+        }
+      }
+    }
+    return null;
+  }
+
+  /// 選択されたピースのアニメーション
+  Widget _buildSelectedPieceAnimation(double cellSize) {
+    final selectedPiece = _findPieceById(_selectedPlacedPieceId!);
+    if (selectedPiece == null || !selectedPiece.isPlaced) {
+      return const SizedBox.shrink();
+    }
+
+    return AnimatedBuilder(
+      animation: _selectionAnimationController,
+      builder: (context, child) {
+        return CustomPaint(
+          size: Size.infinite,
+          painter: _SelectedPieceAnimationPainter(
+            piece: selectedPiece,
+            cellSize: cellSize,
+            animationValue: _selectionAnimationController.value,
+          ),
+        );
+      },
+    );
+  }
+
+  /// 🔥 改善：配置済みピース全体をドラッグエリアに
+  List<Widget> _buildPlacedPieceDragAreas(double cellSize, int gridSize) {
+    if (widget.onPieceRemoved == null) return [];
+
+    final areas = <Widget>[];
+
+    for (final piece in widget.gameState.pieces) {
+      if (piece.isPlaced) {
+        areas.add(_buildPieceDragArea(piece, cellSize));
+      }
+    }
+
+    return areas;
+  }
+
+  /// 🔥 改善：ピース全体のドラッグエリア
+  Widget _buildPieceDragArea(PuzzlePiece piece, double cellSize) {
+    final boardCells = piece.getBoardCells();
+    if (boardCells.isEmpty) return const SizedBox.shrink();
+
+    // ピースの境界を計算
+    final minX = boardCells.map((c) => c.x).reduce((a, b) => a < b ? a : b);
+    final maxX = boardCells.map((c) => c.x).reduce((a, b) => a > b ? a : b);
+    final minY = boardCells.map((c) => c.y).reduce((a, b) => a < b ? a : b);
+    final maxY = boardCells.map((c) => c.y).reduce((a, b) => a > b ? a : b);
+
+    return Positioned(
+      left: minX * cellSize,
+      top: minY * cellSize,
+      width: (maxX - minX + 1) * cellSize,
+      height: (maxY - minY + 1) * cellSize,
+      child: Draggable<String>(
+        data: piece.id,
+
+        dragAnchorStrategy: (draggable, context, position) {
+          return Offset(
+            ((maxX - minX + 1) * cellSize) / 2,
+            ((maxY - minY + 1) * cellSize) / 2,
+          );
+        },
+
+        onDragStarted: () {
+          print('🚀 配置済みピース全体ドラッグ開始: ${piece.id}');
+          widget.onPieceRemoved?.call(piece.id);
+          _clearSelection();
+          HapticFeedback.lightImpact();
+        },
+
+        onDragEnd: (details) {
+          print('🏁 配置済みピース全体ドラッグ終了: ${piece.id}');
+        },
+
+        feedback: Material(
+          color: Colors.transparent,
+          child: Transform.scale(
+            scale: 1.1,
+            child: Container(
+              decoration: BoxDecoration(
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.4),
+                    blurRadius: 12,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
+              ),
+              child: _buildFloatingPiece(piece, cellSize),
+            ),
+          ),
+        ),
+
+        childWhenDragging: Container(
+          decoration: BoxDecoration(
+            color: Colors.grey.withOpacity(0.3),
+            borderRadius: BorderRadius.circular(4),
+            border: Border.all(color: Colors.grey, width: 2),
+          ),
+          child: const Center(
+            child: Icon(Icons.drag_indicator, color: Colors.grey, size: 20),
+          ),
+        ),
+
+        child: Container(
+          decoration: BoxDecoration(
+            color: Colors.transparent,
+            borderRadius: BorderRadius.circular(4),
+          ),
+          child: const Center(
+            child: Icon(
+              Icons.drag_indicator,
+              color: Colors.transparent, // 通常時は透明
+              size: 16,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 🔥 新機能：ピース除去ボタン
+  Widget _buildRemoveButton() {
+    return Positioned(
+      bottom: 20,
+      right: 20,
+      child: FloatingActionButton.small(
+        onPressed: () {
+          if (_selectedPlacedPieceId != null) {
+            _removePieceToTray(_selectedPlacedPieceId!);
+          }
+        },
+        backgroundColor: Colors.red,
+        foregroundColor: Colors.white,
+        child: const Icon(Icons.delete_outline),
+      ),
+    );
+  }
+
+  /// 操作ヘルプ表示
+  Widget _buildInteractionHelp() {
+    return Positioned(
+      top: 10,
+      right: 10,
+      child: Container(
+        padding: const EdgeInsets.all(8),
+        decoration: BoxDecoration(
+          color: Colors.blue.withOpacity(0.9),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              '操作方法',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 12,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 4),
+            const Text(
+              '• タップ: ピース選択',
+              style: TextStyle(color: Colors.white, fontSize: 10),
+            ),
+            if (widget.onPieceRemoved != null) ...[
+              const Text(
+                '• ダブルタップ: 除去',
+                style: TextStyle(color: Colors.white, fontSize: 10),
+              ),
+              const Text(
+                '• ドラッグ: どこでも移動',
+                style: TextStyle(color: Colors.white, fontSize: 10),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// メッセージ表示
+  void _showMessage(String message, Color color) {
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        duration: const Duration(seconds: 1),
+        backgroundColor: color,
+        behavior: SnackBarBehavior.floating,
+        margin: const EdgeInsets.only(bottom: 200, left: 20, right: 20),
+      ),
+    );
+  }
+
+  // 以下、既存のメソッドは同じ
   void _handleDragMoveImproved(
     DragTargetDetails<String> details,
     double cellSize,
@@ -135,23 +475,14 @@ class _GameBoardWidgetState extends State<GameBoardWidget> {
 
     if (piece == null) return;
 
-    // 🔥 重要：盤面内の相対座標を取得
     final RenderBox? renderBox =
         _boardKey.currentContext?.findRenderObject() as RenderBox?;
     if (renderBox == null) return;
 
-    // グローバル座標から盤面内座標に変換
     final localPosition = renderBox.globalToLocal(details.offset);
-
-    print('🎯 Global: ${details.offset}, Local: $localPosition');
-
-    // 🔧 改善：正確なグリッド座標計算
     final gridX = (localPosition.dx / cellSize).floor();
     final gridY = (localPosition.dy / cellSize).floor();
 
-    print('📍 Grid位置: ($gridX, $gridY), セルサイズ: $cellSize');
-
-    // グリッド範囲内チェック
     if (gridX >= 0 && gridX < gridSize && gridY >= 0 && gridY < gridSize) {
       final position = PiecePosition(gridX, gridY);
 
@@ -163,15 +494,13 @@ class _GameBoardWidgetState extends State<GameBoardWidget> {
         _isDragActive = true;
       });
     } else {
-      // 範囲外の場合
       setState(() {
         _currentDragPosition = null;
-        _dragOffset = localPosition; // 位置は記録しておく
+        _dragOffset = localPosition;
       });
     }
   }
 
-  /// 🔥 新機能：リアルタイムプレビュー
   Widget _buildRealTimePreview(
     double cellSize,
     double boardSize,
@@ -181,9 +510,8 @@ class _GameBoardWidgetState extends State<GameBoardWidget> {
       return const SizedBox.shrink();
     }
 
-    // ドラッグ位置でのピース表示
     return Positioned(
-      left: _dragOffset!.dx - (cellSize * 0.5), // ピースの中心をカーソルに合わせる
+      left: _dragOffset!.dx - (cellSize * 0.5),
       top: _dragOffset!.dy - (cellSize * 0.5),
       child: IgnorePointer(
         child: Container(
@@ -203,12 +531,10 @@ class _GameBoardWidgetState extends State<GameBoardWidget> {
     );
   }
 
-  /// 🎨 フローティングピース表示
   Widget _buildFloatingPiece(PuzzlePiece piece, double cellSize) {
     final rotatedCells = piece.getRotatedCells();
     if (rotatedCells.isEmpty) return const SizedBox.shrink();
 
-    // ピースの境界を計算
     final minX = rotatedCells.map((c) => c.x).reduce((a, b) => a < b ? a : b);
     final minY = rotatedCells.map((c) => c.y).reduce((a, b) => a < b ? a : b);
     final maxX = rotatedCells.map((c) => c.x).reduce((a, b) => a > b ? a : b);
@@ -217,7 +543,6 @@ class _GameBoardWidgetState extends State<GameBoardWidget> {
     final width = (maxX - minX + 1) * cellSize;
     final height = (maxY - minY + 1) * cellSize;
 
-    // 🔧 配置可能性チェック
     bool canPlace = false;
     if (_currentDragPosition != null) {
       final result = _validatePlacement(piece, _currentDragPosition!);
@@ -237,13 +562,12 @@ class _GameBoardWidgetState extends State<GameBoardWidget> {
     );
   }
 
-  /// 🔧 改善されたピースドロップ処理
   void _handlePieceDrop(String pieceId, PiecePosition position) {
     print('🎯 ピースドロップ: $pieceId at $position');
 
     final piece = _findPieceById(pieceId);
     if (piece == null) {
-      _showPlacementError('ピースが見つかりませんでした');
+      _showMessage('ピースが見つかりませんでした', Colors.red);
       return;
     }
 
@@ -255,12 +579,11 @@ class _GameBoardWidgetState extends State<GameBoardWidget> {
       HapticFeedback.lightImpact();
     } else {
       print('❌ 配置失敗: ${validationResult.reason}');
-      _showPlacementError(validationResult.reason);
+      _showMessage(validationResult.reason, Colors.red);
       HapticFeedback.mediumImpact();
     }
   }
 
-  /// 🔧 配置検証
   PlacementValidationResult _validatePlacement(
     PuzzlePiece piece,
     PiecePosition position,
@@ -269,7 +592,6 @@ class _GameBoardWidgetState extends State<GameBoardWidget> {
     final rotatedCells = piece.getRotatedCells();
     final boardCells = rotatedCells.map((cell) => cell + position).toList();
 
-    // 1. 盤面範囲チェック
     for (final cell in boardCells) {
       if (cell.x < 0 ||
           cell.x >= gridSize ||
@@ -279,7 +601,6 @@ class _GameBoardWidgetState extends State<GameBoardWidget> {
       }
     }
 
-    // 2. 他のピースとの重複チェック
     final occupiedCells = <PiecePosition>{};
     for (final otherPiece in widget.gameState.pieces) {
       if (otherPiece.id != piece.id && otherPiece.isPlaced) {
@@ -299,7 +620,6 @@ class _GameBoardWidgetState extends State<GameBoardWidget> {
     return PlacementValidationResult(isValid: true, reason: '');
   }
 
-  /// ピースIDからピースオブジェクトを取得
   PuzzlePiece? _findPieceById(String pieceId) {
     try {
       return widget.gameState.pieces.firstWhere((p) => p.id == pieceId);
@@ -308,19 +628,16 @@ class _GameBoardWidgetState extends State<GameBoardWidget> {
     }
   }
 
-  /// ドラッグ状態をリセット
   void _resetDragState() {
     setState(() {
       _draggedPieceId = null;
       _draggedPiece = null;
       _currentDragPosition = null;
       _dragOffset = null;
-      _previewCells = null;
       _isDragActive = false;
     });
   }
 
-  /// 🎨 ヒント表示
   Widget _buildHintOverlay(double cellSize) {
     PuzzlePiece? hintPiece;
     try {
@@ -352,7 +669,6 @@ class _GameBoardWidgetState extends State<GameBoardWidget> {
     );
   }
 
-  /// ヒント位置を探す
   PiecePosition? _findBestHintPosition(PuzzlePiece piece) {
     final gridSize = widget.gameState.settings.difficulty.gridSize;
 
@@ -372,21 +688,6 @@ class _GameBoardWidgetState extends State<GameBoardWidget> {
     return null;
   }
 
-  /// エラー表示
-  void _showPlacementError(String message) {
-    if (!mounted) return;
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        duration: const Duration(seconds: 1),
-        backgroundColor: Colors.red,
-        behavior: SnackBarBehavior.floating,
-      ),
-    );
-  }
-
-  /// 🐛 デバッグ情報表示
   Widget _buildDebugInfo(double cellSize) {
     return Positioned(
       top: 10,
@@ -405,19 +706,11 @@ class _GameBoardWidgetState extends State<GameBoardWidget> {
               style: const TextStyle(color: Colors.white, fontSize: 10),
             ),
             Text(
-              'ピース: ${_draggedPieceId?.substring(0, 8) ?? "なし"}',
+              '選択: ${_selectedPlacedPieceId?.substring(0, 8) ?? "なし"}',
               style: const TextStyle(color: Colors.white, fontSize: 10),
             ),
             Text(
               'Grid位置: ${_currentDragPosition?.toString() ?? "なし"}',
-              style: const TextStyle(color: Colors.white, fontSize: 10),
-            ),
-            Text(
-              'オフセット: ${_dragOffset != null ? "(${_dragOffset!.dx.toInt()}, ${_dragOffset!.dy.toInt()})" : "なし"}',
-              style: const TextStyle(color: Colors.white, fontSize: 10),
-            ),
-            Text(
-              'セルサイズ: ${cellSize.toStringAsFixed(1)}',
               style: const TextStyle(color: Colors.white, fontSize: 10),
             ),
           ],
@@ -433,6 +726,49 @@ class PlacementValidationResult {
   final String reason;
 
   PlacementValidationResult({required this.isValid, required this.reason});
+}
+
+/// 選択されたピースアニメーションペインター
+class _SelectedPieceAnimationPainter extends CustomPainter {
+  final PuzzlePiece piece;
+  final double cellSize;
+  final double animationValue;
+
+  const _SelectedPieceAnimationPainter({
+    required this.piece,
+    required this.cellSize,
+    required this.animationValue,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final boardCells = piece.getBoardCells();
+    final paint = Paint();
+
+    final opacity = 0.3 + (animationValue * 0.5);
+
+    paint
+      ..color = Colors.yellow.withOpacity(opacity)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 4.0;
+
+    for (final cell in boardCells) {
+      final rect = Rect.fromLTWH(
+        cell.x * cellSize,
+        cell.y * cellSize,
+        cellSize,
+        cellSize,
+      );
+
+      final rrect = RRect.fromRectAndRadius(rect, const Radius.circular(6));
+      canvas.drawRRect(rrect, paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(_SelectedPieceAnimationPainter oldDelegate) {
+    return oldDelegate.animationValue != animationValue;
+  }
 }
 
 /// フローティングピースペインター
@@ -452,7 +788,6 @@ class _FloatingPiecePainter extends CustomPainter {
     final paint = Paint();
     final cells = piece.getRotatedCells();
 
-    // 最小座標を基準にする
     final minX = cells.isNotEmpty
         ? cells.map((c) => c.x).reduce((a, b) => a < b ? a : b)
         : 0;
@@ -468,11 +803,9 @@ class _FloatingPiecePainter extends CustomPainter {
         cellSize,
       );
 
-      // 配置可能性に応じて色を変更
       final opacity = canPlace ? 0.8 : 0.6;
       final borderColor = canPlace ? piece.color : Colors.red;
 
-      // 塗りつぶし
       paint
         ..color = piece.color.withOpacity(opacity)
         ..style = PaintingStyle.fill;
@@ -480,7 +813,6 @@ class _FloatingPiecePainter extends CustomPainter {
       final rrect = RRect.fromRectAndRadius(rect, const Radius.circular(4));
       canvas.drawRRect(rrect, paint);
 
-      // 境界線
       paint
         ..color = borderColor
         ..strokeWidth = 2.0
@@ -488,7 +820,6 @@ class _FloatingPiecePainter extends CustomPainter {
 
       canvas.drawRRect(rrect, paint);
 
-      // ハイライト効果
       if (canPlace) {
         paint
           ..color = Colors.white.withOpacity(0.3)

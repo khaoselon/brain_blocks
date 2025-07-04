@@ -1,4 +1,4 @@
-// lib/screens/game_screen.dart - ドラッグ&ドロップ対応版
+// lib/screens/game_screen.dart - ピース除去機能対応版
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -71,11 +71,9 @@ class _GameScreenState extends ConsumerState<GameScreen>
       body: SafeArea(
         child: LayoutBuilder(
           builder: (context, constraints) {
-            // 🔧 改善：画面サイズに応じたレイアウト選択
             final isLandscape = constraints.maxWidth > constraints.maxHeight;
             final screenWidth = constraints.maxWidth;
 
-            // 大きな横画面の場合は従来レイアウト、それ以外は新レイアウト
             if (isLandscape && screenWidth > 800) {
               return _buildLandscapeLayout(gameState, constraints);
             } else {
@@ -87,11 +85,9 @@ class _GameScreenState extends ConsumerState<GameScreen>
     );
   }
 
-  /// 🎨 新しい縦並びレイアウト（メイン）
+  /// 縦並びレイアウト
   Widget _buildPortraitLayout(GameState gameState, BoxConstraints constraints) {
     final screenHeight = constraints.maxHeight;
-
-    // レイアウト比率を動的計算
     final headerHeight = 90.0;
     final trayHeight = (screenHeight * 0.22).clamp(140.0, 220.0);
 
@@ -109,18 +105,19 @@ class _GameScreenState extends ConsumerState<GameScreen>
 
         const SizedBox(height: 8),
 
-        // 🔥 改善：メインゲーム盤面（最大化）
+        // メインゲーム盤面
         Expanded(
           child: Container(
             margin: const EdgeInsets.symmetric(horizontal: 16),
             child: Center(
               child: AspectRatio(
-                aspectRatio: 1.0, // 正方形を保持
+                aspectRatio: 1.0,
                 child: GameBoardWidget(
                   gameState: gameState,
                   hintPieceId: _hintPieceId,
                   hintAnimation: _hintAnimationController,
                   onPiecePlaced: _onPiecePlaced,
+                  onPieceRemoved: _onPieceRemoved, // 🔥 新機能
                 ),
               ),
             ),
@@ -129,7 +126,7 @@ class _GameScreenState extends ConsumerState<GameScreen>
 
         const SizedBox(height: 8),
 
-        // 🔥 改善：下部ピーストレイ（横スクロール）
+        // 下部ピーストレイ
         Container(
           height: trayHeight,
           margin: const EdgeInsets.symmetric(horizontal: 16),
@@ -137,7 +134,7 @@ class _GameScreenState extends ConsumerState<GameScreen>
             pieces: gameState.pieces,
             onPieceSelected: _onPieceSelected,
             onPieceRotated: _onPieceRotated,
-            isHorizontal: true, // 🔥 重要：横向きレイアウト
+            isHorizontal: true,
           ),
         ),
 
@@ -146,7 +143,7 @@ class _GameScreenState extends ConsumerState<GameScreen>
     );
   }
 
-  /// 🎨 横画面レイアウト（大画面用）
+  /// 横画面レイアウト
   Widget _buildLandscapeLayout(
     GameState gameState,
     BoxConstraints constraints,
@@ -176,6 +173,7 @@ class _GameScreenState extends ConsumerState<GameScreen>
                     hintPieceId: _hintPieceId,
                     hintAnimation: _hintAnimationController,
                     onPiecePlaced: _onPiecePlaced,
+                    onPieceRemoved: _onPieceRemoved, // 🔥 新機能
                   ),
                 ),
               ),
@@ -187,7 +185,7 @@ class _GameScreenState extends ConsumerState<GameScreen>
                   pieces: gameState.pieces,
                   onPieceSelected: _onPieceSelected,
                   onPieceRotated: _onPieceRotated,
-                  isHorizontal: false, // 縦向きレイアウト
+                  isHorizontal: false,
                 ),
               ),
             ],
@@ -199,7 +197,7 @@ class _GameScreenState extends ConsumerState<GameScreen>
     );
   }
 
-  // 以下、既存のメソッドは変更なし
+  // ゲーム状態変化の監視
   void _handleGameStatusChange(GameState? previous, GameState current) {
     switch (current.status) {
       case GameStatus.completed:
@@ -239,7 +237,7 @@ class _GameScreenState extends ConsumerState<GameScreen>
     );
   }
 
-  /// 🔧 改善：ピース配置処理
+  /// ピース配置処理
   void _onPiecePlaced(String pieceId, PiecePosition position) {
     print('🎯 ピース配置コールバック: $pieceId at $position');
 
@@ -248,16 +246,34 @@ class _GameScreenState extends ConsumerState<GameScreen>
       HapticFeedback.lightImpact();
 
       // 配置成功のフィードバック
-      _showPlacementSuccess();
+      _showSuccessMessage('ピースを配置しました！');
     } catch (e) {
       print('❌ ピース配置エラー: $e');
       HapticFeedback.mediumImpact();
+      _showErrorMessage('ピース配置に失敗しました');
+    }
+  }
+
+  /// 🔥 新機能：ピース除去処理
+  void _onPieceRemoved(String pieceId) {
+    print('🔄 ピース除去コールバック: $pieceId');
+
+    try {
+      ref.read(gameStateProvider.notifier).removePiece(pieceId);
+      HapticFeedback.mediumImpact();
+
+      // 除去成功のフィードバック
+      _showInfoMessage('ピースを取り外しました');
+    } catch (e) {
+      print('❌ ピース除去エラー: $e');
+      HapticFeedback.heavyImpact();
+      _showErrorMessage('ピース除去に失敗しました');
     }
   }
 
   void _onPieceSelected(String pieceId) {
-    // ピース選択時の処理（必要に応じて実装）
     print('🎯 ピース選択: $pieceId');
+    // 必要に応じて追加処理
   }
 
   void _onPieceRotated(String pieceId) {
@@ -265,21 +281,52 @@ class _GameScreenState extends ConsumerState<GameScreen>
     HapticFeedback.selectionClick();
 
     // 回転フィードバック
+    _showInfoMessage('ピースを回転しました');
+  }
+
+  /// 🎉 成功メッセージ表示
+  void _showSuccessMessage(String message) {
+    _showMessage(message, Colors.green);
+  }
+
+  /// ⚠️ エラーメッセージ表示
+  void _showErrorMessage(String message) {
+    _showMessage(message, Colors.red);
+  }
+
+  /// ℹ️ 情報メッセージ表示
+  void _showInfoMessage(String message) {
+    _showMessage(message, Colors.blue);
+  }
+
+  /// 共通メッセージ表示
+  void _showMessage(String message, Color color) {
+    if (!mounted) return;
+
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: const Text('ピースを回転しました'),
-        duration: const Duration(milliseconds: 500),
-        backgroundColor: const Color(0xFF2E86C1),
+        content: Row(
+          children: [
+            Icon(_getMessageIcon(color), color: Colors.white, size: 20),
+            const SizedBox(width: 8),
+            Expanded(child: Text(message)),
+          ],
+        ),
+        duration: const Duration(milliseconds: 1500),
+        backgroundColor: color,
         behavior: SnackBarBehavior.floating,
         margin: const EdgeInsets.only(bottom: 200, left: 20, right: 20),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
       ),
     );
   }
 
-  /// 🎉 配置成功時のフィードバック
-  void _showPlacementSuccess() {
-    // 軽微な成功フィードバック（オプション）
-    // 必要に応じて実装
+  /// メッセージアイコン取得
+  IconData _getMessageIcon(Color color) {
+    if (color == Colors.green) return Icons.check_circle;
+    if (color == Colors.red) return Icons.error;
+    if (color == Colors.blue) return Icons.info;
+    return Icons.notifications;
   }
 
   void _useHint() async {
@@ -304,7 +351,10 @@ class _GameScreenState extends ConsumerState<GameScreen>
         });
 
         ref.read(gameStateProvider.notifier).useHint();
+        _showInfoMessage('ヒントを表示しました！');
       }
+    } else {
+      _showInfoMessage('配置可能なピースがありません');
     }
   }
 
@@ -319,8 +369,9 @@ class _GameScreenState extends ConsumerState<GameScreen>
             onPressed: () => Navigator.of(context).pop(false),
             child: const Text('キャンセル'),
           ),
-          TextButton(
+          ElevatedButton(
             onPressed: () => Navigator.of(context).pop(true),
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
             child: const Text('リセット'),
           ),
         ],
@@ -328,6 +379,7 @@ class _GameScreenState extends ConsumerState<GameScreen>
     ).then((confirmed) {
       if (confirmed == true) {
         ref.read(gameStateProvider.notifier).resetGame();
+        _showInfoMessage('ゲームをリセットしました');
       }
     });
   }
@@ -339,36 +391,44 @@ class _GameScreenState extends ConsumerState<GameScreen>
       context: context,
       barrierDismissible: false,
       builder: (context) => AlertDialog(
-        title: const Text('一時停止'),
+        title: const Row(
+          children: [
+            Icon(Icons.pause_circle, color: Color(0xFF2E86C1)),
+            SizedBox(width: 8),
+            Text('一時停止'),
+          ],
+        ),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            ListTile(
-              leading: const Icon(Icons.play_arrow),
-              title: const Text('ゲーム再開'),
+            _buildPauseMenuItem(
+              icon: Icons.play_arrow,
+              title: 'ゲーム再開',
               onTap: () {
                 Navigator.of(context).pop();
                 ref.read(gameStateProvider.notifier).resumeGame();
+                _showInfoMessage('ゲームを再開しました');
               },
             ),
-            ListTile(
-              leading: const Icon(Icons.refresh),
-              title: const Text('リスタート'),
+            _buildPauseMenuItem(
+              icon: Icons.refresh,
+              title: 'リスタート',
               onTap: () {
                 Navigator.of(context).pop();
                 _resetGame();
               },
             ),
-            ListTile(
-              leading: const Icon(Icons.settings),
-              title: const Text('設定'),
+            _buildPauseMenuItem(
+              icon: Icons.settings,
+              title: '設定',
               onTap: () {
                 Navigator.of(context).pop();
+                // 設定画面遷移（必要に応じて実装）
               },
             ),
-            ListTile(
-              leading: const Icon(Icons.home),
-              title: const Text('メニューに戻る'),
+            _buildPauseMenuItem(
+              icon: Icons.home,
+              title: 'メニューに戻る',
               onTap: () async {
                 Navigator.of(context).pop();
                 final adService = ref.read(admobServiceProvider);
@@ -384,6 +444,20 @@ class _GameScreenState extends ConsumerState<GameScreen>
     );
   }
 
+  /// ポーズメニューアイテム構築
+  Widget _buildPauseMenuItem({
+    required IconData icon,
+    required String title,
+    required VoidCallback onTap,
+  }) {
+    return ListTile(
+      leading: Icon(icon, color: const Color(0xFF2E86C1)),
+      title: Text(title),
+      onTap: onTap,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+    );
+  }
+
   void _showResultDialog(bool isSuccess) {
     showDialog(
       context: context,
@@ -394,6 +468,7 @@ class _GameScreenState extends ConsumerState<GameScreen>
         onPlayAgain: () {
           Navigator.of(context).pop();
           ref.read(gameStateProvider.notifier).startNewGame();
+          _showInfoMessage('新しいゲームを開始しました！');
         },
         onBackToMenu: () async {
           Navigator.of(context).pop();

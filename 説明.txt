@@ -1,0 +1,533 @@
+
+---
+
+# Android設定ファイル
+
+## android/app/src/main/AndroidManifest.xml
+```xml
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    
+    <!-- ネットワーク権限（AdMob用） -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    
+    <!-- バイブレーション権限 -->
+    <uses-permission android:name="android.permission.VIBRATE" />
+
+    <application
+        android:label="ブレインブロックス"
+        android:name="${applicationName}"
+        android:icon="@mipmap/ic_launcher"
+        android:theme="@style/LaunchTheme"
+        android:exported="true"
+        android:usesCleartextTraffic="false">
+        
+        <!-- MainActivity -->
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTop"
+            android:taskAffinity=""
+            android:theme="@style/LaunchTheme"
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
+            android:hardwareAccelerated="true"
+            android:windowSoftInputMode="adjustResize"
+            android:screenOrientation="portrait">
+            
+            <meta-data
+              android:name="io.flutter.embedding.android.NormalTheme"
+              android:resource="@style/NormalTheme" />
+            
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+        </activity>
+
+        <!-- AdMob App ID -->
+        <meta-data
+            android:name="com.google.android.gms.ads.APPLICATION_ID"
+            android:value="ca-app-pub-3940256099942544~3347511713"/> <!-- テスト用ID -->
+        
+        <!-- Flutter Engine -->
+        <meta-data
+            android:name="flutterEmbedding"
+            android:value="2" />
+    </application>
+    
+    <!-- Android 12+ のSplashScreen対応 -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="https" />
+        </intent>
+    </queries>
+</manifest>
+```
+
+## android/app/build.gradle
+```gradle
+android {
+    namespace "com.mkproject.brain_blocks"
+    compileSdk 35
+    ndkVersion "27.0.12077973"
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+
+    kotlinOptions {
+        jvmTarget = '1.8'
+    }
+
+    defaultConfig {
+        applicationId "com.mkproject.brain_blocks"
+        minSdk 21      // Android 5.0以上をサポート
+        targetSdk 35   // 最新SDKをターゲット
+        versionCode 1
+        versionName "1.0.0"
+        
+        // マルチAPK生成（サイズ最適化）
+        ndk {
+            abiFilters 'arm64-v8a', 'armeabi-v7a', 'x86_64'
+        }
+    }
+
+    signingConfigs {
+        release {
+            // リリース用署名設定（実際の値は環境変数やキーストアから読み込み）
+            keyAlias keystoreProperties['keyAlias']
+            keyPassword keystoreProperties['keyPassword']
+            storeFile file(keystoreProperties['storeFile'])
+            storePassword keystoreProperties['storePassword']
+        }
+    }
+
+    buildTypes {
+        release {
+            signingConfig signingConfigs.release
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+        debug {
+            applicationIdSuffix ".debug"
+            debuggable true
+        }
+    }
+}
+
+dependencies {
+    implementation 'androidx.window:window:1.0.0'
+    implementation 'androidx.window:window-java:1.0.0'
+}
+```
+
+---
+
+# iOS設定ファイル
+
+## ios/Runner/Info.plist
+```xml
+
+# iOS設定最終確認 - ios/Runner/Info.plist
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleDevelopmentRegion</key>
+    <string>ja_JP</string>
+    
+    <key>CFBundleDisplayName</key>
+    <string>ブレインブロックス</string>
+    
+    <key>CFBundleExecutable</key>
+    <string>$(EXECUTABLE_NAME)</string>
+    
+    <key>CFBundleIdentifier</key>
+    <string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+    
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    
+    <key>CFBundleName</key>
+    <string>brain_blocks</string>
+    
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    
+    <key>CFBundleShortVersionString</key>
+    <string>$(FLUTTER_BUILD_NAME)</string>
+    
+    <key>CFBundleSignature</key>
+    <string>????</string>
+    
+    <key>CFBundleVersion</key>
+    <string>$(FLUTTER_BUILD_NUMBER)</string>
+    
+    <key>LSRequiresIPhoneOS</key>
+    <true/>
+    
+    <!-- 画面向き制限（縦向きのみ） -->
+    <key>UISupportedInterfaceOrientations</key>
+    <array>
+        <string>UIInterfaceOrientationPortrait</string>
+        <string>UIInterfaceOrientationPortraitUpsideDown</string>
+    </array>
+    
+    <key>UISupportedInterfaceOrientations~ipad</key>
+    <array>
+        <string>UIInterfaceOrientationPortrait</string>
+        <string>UIInterfaceOrientationPortraitUpsideDown</string>
+    </array>
+    
+    <!-- AdMob App ID -->
+    <key>GADApplicationIdentifier</key>
+    <string>ca-app-pub-3940256099942544~1458002511</string> <!-- 本番時は実際のIDに変更 -->
+    
+    <!-- App Transport Security -->
+    <key>NSAppTransportSecurity</key>
+    <dict>
+        <key>NSAllowsArbitraryLoads</key>
+        <false/>
+        <key>NSAllowsArbitraryLoadsInWebContent</key>
+        <true/>
+    </dict>
+    
+    <!-- ★ ATT (App Tracking Transparency) - 必須 ★ -->
+    <key>NSUserTrackingUsageDescription</key>
+    <string>このアプリは、より関連性の高い広告を表示するためにアプリ間でのアクティビティを追跡します。これにより、アプリの継続的な改善とより良いユーザー体験を提供することができます。</string>
+    
+    <!-- 追加のプライバシー説明（推奨） -->
+    <key>NSPrivacyAccessedAPITypes</key>
+    <array>
+        <dict>
+            <key>NSPrivacyAccessedAPIType</key>
+            <string>NSPrivacyAccessedAPICategoryUserDefaults</string>
+            <key>NSPrivacyAccessedAPITypeReasons</key>
+            <array>
+                <string>CA92.1</string>
+            </array>
+        </dict>
+    </array>
+    
+    <!-- SKAdNetwork identifiers (AdMob用) -->
+    <key>SKAdNetworkItems</key>
+    <array>
+        <dict>
+            <key>SKAdNetworkIdentifier</key>
+            <string>cstr6suwn9.skadnetwork</string>
+        </dict>
+        <dict>
+            <key>SKAdNetworkIdentifier</key>
+            <string>4fzdc2evr5.skadnetwork</string>
+        </dict>
+        <dict>
+            <key>SKAdNetworkIdentifier</key>
+            <string>2fnua5tdw4.skadnetwork</string>
+        </dict>
+        <dict>
+            <key>SKAdNetworkIdentifier</key>
+            <string>ydx93a7ass.skadnetwork</string>
+        </dict>
+        <dict>
+            <key>SKAdNetworkIdentifier</key>
+            <string>5a6flpkh64.skadnetwork</string>
+        </dict>
+        <dict>
+            <key>SKAdNetworkIdentifier</key>
+            <string>p78axxw29g.skadnetwork</string>
+        </dict>
+        <dict>
+            <key>SKAdNetworkIdentifier</key>
+            <string>v72qych5uu.skadnetwork</string>
+        </dict>
+        <dict>
+            <key>SKAdNetworkIdentifier</key>
+            <string>c6k4g5qg8m.skadnetwork</string>
+        </dict>
+        <dict>
+            <key>SKAdNetworkIdentifier</key>
+            <string>s39g8k73mm.skadnetwork</string>
+        </dict>
+        <dict>
+            <key>SKAdNetworkIdentifier</key>
+            <string>3qy4746246.skadnetwork</string>
+        </dict>
+        <dict>
+            <key>SKAdNetworkIdentifier</key>
+            <string>f38h382jlk.skadnetwork</string>
+        </dict>
+        <dict>
+            <key>SKAdNetworkIdentifier</key>
+            <string>hs6bdukanm.skadnetwork</string>
+        </dict>
+        <dict>
+            <key>SKAdNetworkIdentifier</key>
+            <string>v4nxqhlyqp.skadnetwork</string>
+        </dict>
+        <dict>
+            <key>SKAdNetworkIdentifier</key>
+            <string>wzmmz9fp6w.skadnetwork</string>
+        </dict>
+        <dict>
+            <key>SKAdNetworkIdentifier</key>
+            <string>yclnxrl5pm.skadnetwork</string>
+        </dict>
+        <dict>
+            <key>SKAdNetworkIdentifier</key>
+            <string>t38b2kh725.skadnetwork</string>
+        </dict>
+        <dict>
+            <key>SKAdNetworkIdentifier</key>
+            <string>7ug5zh24hu.skadnetwork</string>
+        </dict>
+        <dict>
+            <key>SKAdNetworkIdentifier</key>
+            <string>9rd848q2bz.skadnetwork</string>
+        </dict>
+        <dict>
+            <key>SKAdNetworkIdentifier</key>
+            <string>n6fk4nfna4.skadnetwork</string>
+        </dict>
+        <dict>
+            <key>SKAdNetworkIdentifier</key>
+            <string>kbd757ywx3.skadnetwork</string>
+        </dict>
+        <dict>
+            <key>SKAdNetworkIdentifier</key>
+            <string>9t245vhmpl.skadnetwork</string>
+        </dict>
+        <dict>
+            <key>SKAdNetworkIdentifier</key>
+            <string>a2p9lx4jpn.skadnetwork</string>
+        </dict>
+        <dict>
+            <key>SKAdNetworkIdentifier</key>
+            <string>22mmun2rn5.skadnetwork</string>
+        </dict>
+        <dict>
+            <key>SKAdNetworkIdentifier</key>
+            <string>4468km3ulz.skadnetwork</string>
+        </dict>
+        <dict>
+            <key>SKAdNetworkIdentifier</key>
+            <string>2u9pt9hc89.skadnetwork</string>
+        </dict>
+        <dict>
+            <key>SKAdNetworkIdentifier</key>
+            <string>8s468mfl3y.skadnetwork</string>
+        </dict>
+        <dict>
+            <key>SKAdNetworkIdentifier</key>
+            <string>klf5c3l5u5.skadnetwork</string>
+        </dict>
+        <dict>
+            <key>SKAdNetworkIdentifier</key>
+            <string>ppxm28t8ap.skadnetwork</string>
+        </dict>
+        <dict>
+            <key>SKAdNetworkIdentifier</key>
+            <string>ecpz2srf59.skadnetwork</string>
+        </dict>
+        <dict>
+            <key>SKAdNetworkIdentifier</key>
+            <string>uw77j35x4d.skadnetwork</string>
+        </dict>
+        <dict>
+            <key>SKAdNetworkIdentifier</key>
+            <string>pwa73g5rt2.skadnetwork</string>
+        </dict>
+        <dict>
+            <key>SKAdNetworkIdentifier</key>
+            <string>mlmmfzh3r3.skadnetwork</string>
+        </dict>
+        <dict>
+            <key>SKAdNetworkIdentifier</key>
+            <string>578prtvx9j.skadnetwork</string>
+        </dict>
+        <dict>
+            <key>SKAdNetworkIdentifier</key>
+            <string>4dzt52r2t5.skadnetwork</string>
+        </dict>
+        <dict>
+            <key>SKAdNetworkIdentifier</key>
+            <string>e5fvkxwrpn.skadnetwork</string>
+        </dict>
+        <dict>
+            <key>SKAdNetworkIdentifier</key>
+            <string>8c4e2ghe7u.skadnetwork</string>
+        </dict>
+        <dict>
+            <key>SKAdNetworkIdentifier</key>
+            <string>zq492l623r.skadnetwork</string>
+        </dict>
+        <dict>
+            <key>SKAdNetworkIdentifier</key>
+            <string>3rd42ekr43.skadnetwork</string>
+        </dict>
+        <dict>
+            <key>SKAdNetworkIdentifier</key>
+            <string>3qcr597p9d.skadnetwork</string>
+        </dict>
+    </array>
+    
+    <!-- 最小iOS版本 -->
+    <key>MinimumOSVersion</key>
+    <string>12.0</string>
+    
+    <!-- Launch Screen -->
+    <key>UILaunchStoryboardName</key>
+    <string>LaunchScreen</string>
+    
+    <!-- Main Storyboard -->
+    <key>UIMainStoryboardFile</key>
+    <string>Main</string>
+    
+    <!-- ステータスバー設定 -->
+    <key>UIStatusBarHidden</key>
+    <false/>
+    
+    <key>UIViewControllerBasedStatusBarAppearance</key>
+    <false/>
+</dict>
+</plist>
+
+
+```
+
+## ios/Runner/AppDelegate.swift
+```swift
+import UIKit
+import Flutter
+import GoogleMobileAds
+
+@main
+@objc class AppDelegate: FlutterAppDelegate {
+  override func application(
+    _ application: UIApplication,
+    didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
+  ) -> Bool {
+    
+    // AdMob初期化
+    GADMobileAds.sharedInstance().start(completionHandler: nil)
+    
+    GeneratedPluginRegistrant.register(with: self)
+    return super.application(application, didFinishLaunchingWithOptions: launchOptions)
+  }
+}
+```
+
+---
+
+# その他設定ファイル
+
+## android/gradle.properties
+```properties
+org.gradle.jvmargs=-Xmx4G -XX:MaxMetaspaceSize=2G -XX:+HeapDumpOnOutOfMemoryError
+android.useAndroidX=true
+android.enableJetifier=true
+android.enableR8=true
+android.nonTransitiveRClass=true
+```
+
+## .gitignore 追加項目
+```
+# AdMob関連
+google-services.json
+GoogleService-Info.plist
+
+# キーストア
+*.keystore
+*.jks
+key.properties
+
+# Hive生成ファイル
+**/*.g.dart
+
+# build_runner生成ファイル
+**/*.freezed.dart
+```
+
+---
+
+# 開発・ビルドコマンド
+
+## 開発時コマンド
+```bash
+# 依存関係インストール
+flutter pub get
+
+# コード生成（Hive、Riverpod等）
+flutter packages pub run build_runner build
+
+# 開発実行（デバッグモード）
+flutter run
+
+# ホットリロード
+r キー
+
+# ホットリスタート
+R キー
+```
+
+## ビルドコマンド
+```bash
+# Android APK生成（デバッグ）
+flutter build apk --debug
+
+# Android APK生成（リリース）
+flutter build apk --release
+
+# Android App Bundle生成（Play Store用）
+flutter build appbundle --release
+
+# iOS ビルド（Xcodeプロジェクト生成）
+flutter build ios --release
+
+# Web ビルド（将来対応）
+flutter build web --release
+```
+
+## テスト・解析コマンド
+```bash
+# 単体テスト実行
+flutter test
+
+# コード解析
+flutter analyze
+
+# 依存関係確認
+flutter pub deps
+
+# パフォーマンス分析
+flutter run --profile
+```
+
+---
+
+# リリース準備チェックリスト
+
+## Android
+- [ ] 本番用AdMob App IDに変更
+- [ ] google-services.json配置
+- [ ] 署名設定完了
+- [ ] アプリ権限確認
+- [ ] ProGuard設定
+- [ ] Play Console準備
+
+## iOS  
+- [ ] 本番用AdMob App IDに変更
+- [ ] GoogleService-Info.plist配置
+- [ ] App Store Connect設定
+- [ ] 証明書・プロファイル設定
+- [ ] App Tracking Transparency対応
+- [ ] TestFlight準備
+
+## 共通
+- [ ] プライバシーポリシー作成
+- [ ] 利用規約作成
+- [ ] アプリストア説明文準備
+- [ ] スクリーンショット撮影
+- [ ] アイコン最終確認

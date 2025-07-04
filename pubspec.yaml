@@ -1,0 +1,98 @@
+name: brain_blocks
+description: "ランダムピースパズルゲーム - ブレインブロックス"
+publish_to: 'none' 
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.8.0-278.1.beta
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  cupertino_icons: ^1.0.8
+
+
+    # 状態管理
+  flutter_riverpod: ^2.6.1
+  riverpod_annotation: ^2.6.1
+  
+  # ローカルストレージ
+  hive_flutter: ^1.1.0
+  
+  # AdMob広告
+  google_mobile_ads: ^6.0.0
+  
+  # ATT (App Tracking Transparency) - 追加
+  app_tracking_transparency: ^2.0.5
+  
+  
+    # Firebase Core（必須）
+  firebase_core: ^2.32.0
+  
+  # Firebase Analytics
+  firebase_analytics: ^10.10.7
+  
+  # Firebase Crashlytics
+  firebase_crashlytics: ^3.5.7
+  
+  # Firebase Remote Config
+  firebase_remote_config: ^4.4.7
+  
+  # Firebase Performance Monitoring
+  firebase_performance: ^0.9.4+7
+
+
+  # ゲームエンジン（軽量利用）
+  flame: ^1.22.0
+  
+  # UI/アニメーション
+  lottie: ^3.3.0
+  rive: ^0.13.4
+  
+  # 国際化
+  flutter_localizations:
+    sdk: flutter
+  intl: ^0.20.2
+  
+  # ユーティリティ
+  collection: ^1.18.0
+  equatable: ^2.0.5
+  uuid: ^4.5.1
+  
+  # デバッグ用
+  logger: ^2.4.0
+  
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+
+  flutter_lints: ^5.0.0
+
+    # コード生成
+  riverpod_generator: ^2.4.0
+  build_runner: ^2.4.13
+  json_annotation: ^4.9.0
+  json_serializable: ^6.8.0
+  
+  # Hive用
+  hive_generator: ^2.0.1
+
+
+flutter:
+
+  uses-material-design: true
+
+  assets:
+    - assets/images/
+    - assets/lottie/
+    - assets/rive/
+    - assets/sounds/
+  
+  fonts:
+    - family: NotoSansJP
+      fonts:
+        - asset: assets/fonts/NotoSansJP-Regular.ttf
+        - asset: assets/fonts/NotoSansJP-Bold.ttf
+          weight: 700

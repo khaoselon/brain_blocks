@@ -1,0 +1,964 @@
+# テストディレクトリ構成
+test/
+├── unit/                          # 単体テスト
+│   ├── models/
+│   │   ├── puzzle_piece_test.dart
+│   │   └── game_state_test.dart
+│   ├── services/
+│   │   ├── puzzle_generator_test.dart
+│   │   ├── admob_service_test.dart
+│   │   └── audio_service_test.dart
+│   └── utils/
+│       ├── performance_monitor_test.dart
+│       └── error_handler_test.dart
+├── widget/                        # ウィジェットテスト
+│   ├── screens/
+│   │   ├── home_screen_test.dart
+│   │   ├── game_screen_test.dart
+│   │   └── settings_screen_test.dart
+│   └── widgets/
+│       ├── game_board_widget_test.dart
+│       └── piece_tray_widget_test.dart
+├── integration/                   # 統合テスト
+│   ├── app_test.dart
+│   ├── game_flow_test.dart
+│   └── settings_flow_test.dart
+└── test_helpers/                  # テストヘルパー
+    ├── mock_data.dart
+    ├── test_utils.dart
+    └── widget_tester_extensions.dart
+
+---
+
+# test/unit/models/puzzle_piece_test.dart
+import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter/material.dart';
+import 'package:brain_blocks/models/puzzle_piece.dart';
+
+void main() {
+  group('PuzzlePiece Tests', () {
+    test('PiecePosition should calculate correctly', () {
+      const pos1 = PiecePosition(2, 3);
+      const pos2 = PiecePosition(1, 1);
+      
+      final result = pos1 + pos2;
+      
+      expect(result.x, equals(3));
+      expect(result.y, equals(4));
+    });
+
+    test('PiecePosition rotation should work correctly', () {
+      const pos = PiecePosition(1, 0);
+      final rotated = pos.rotate();
+      
+      expect(rotated.x, equals(0));
+      expect(rotated.y, equals(1));
+    });
+
+    test('PuzzlePiece should create correctly', () {
+      final piece = PuzzlePiece(
+        id: 'test-piece',
+        cells: const [
+          PiecePosition(0, 0),
+          PiecePosition(1, 0),
+          PiecePosition(0, 1),
+        ],
+        color: Colors.blue,
+      );
+
+      expect(piece.id, equals('test-piece'));
+      expect(piece.cells.length, equals(3));
+      expect(piece.color, equals(Colors.blue));
+      expect(piece.isPlaced, isFalse);
+    });
+
+    test('PuzzlePiece rotation should work correctly', () {
+      final piece = PuzzlePiece(
+        id: 'test-piece',
+        cells: const [
+          PiecePosition(0, 0),
+          PiecePosition(1, 0),
+        ],
+        color: Colors.blue,
+        rotation: 1,
+      );
+
+      final rotatedCells = piece.getRotatedCells();
+      
+      expect(rotatedCells[0], equals(const PiecePosition(0, 0)));
+      expect(rotatedCells[1], equals(const PiecePosition(0, 1)));
+    });
+
+    test('PuzzlePiece board cells should calculate correctly', () {
+      final piece = PuzzlePiece(
+        id: 'test-piece',
+        cells: const [
+          PiecePosition(0, 0),
+          PiecePosition(1, 0),
+        ],
+        color: Colors.blue,
+        boardPosition: const PiecePosition(2, 3),
+      );
+
+      final boardCells = piece.getBoardCells();
+      
+      expect(boardCells[0], equals(const PiecePosition(2, 3)));
+      expect(boardCells[1], equals(const PiecePosition(3, 3)));
+    });
+  });
+}
+
+---
+
+# test/unit/services/puzzle_generator_test.dart
+import 'package:flutter_test/flutter_test.dart';
+import 'package:brain_blocks/services/puzzle_generator.dart';
+
+void main() {
+  group('PuzzleGenerator Tests', () {
+    test('should generate correct number of pieces for 5x5 grid', () {
+      final pieces = PuzzleGenerator.generatePuzzle(gridSize: 5);
+      
+      expect(pieces, isNotEmpty);
+      expect(pieces.length, greaterThan(0));
+      expect(pieces.length, lessThan(25)); // 最大25個（全て1セル）
+      
+      // 全ピースのセル数の合計が25になることを確認
+      final totalCells = pieces
+          .map((p) => p.cells.length)
+          .reduce((a, b) => a + b);
+      expect(totalCells, equals(25));
+    });
+
+    test('should generate pieces with valid colors', () {
+      final pieces = PuzzleGenerator.generatePuzzle(gridSize: 5);
+      
+      for (final piece in pieces) {
+        expect(piece.color, isNotNull);
+        expect(piece.id, isNotEmpty);
+      }
+    });
+
+    test('should generate pieces with 2-6 cells each', () {
+      final pieces = PuzzleGenerator.generatePuzzle(gridSize: 7);
+      
+      for (final piece in pieces) {
+        expect(piece.cells.length, greaterThanOrEqualTo(2));
+        expect(piece.cells.length, lessThanOrEqualTo(6));
+      }
+    });
+
+    test('generated pieces should have relative coordinates', () {
+      final pieces = PuzzleGenerator.generatePuzzle(gridSize: 5);
+      
+      for (final piece in pieces) {
+        // 最小座標が(0,0)であることを確認
+        final minX = piece.cells.map((c) => c.x).reduce((a, b) => a < b ? a : b);
+        final minY = piece.cells.map((c) => c.y).reduce((a, b) => a < b ? a : b);
+        
+        expect(minX, equals(0));
+        expect(minY, equals(0));
+      }
+    });
+
+    test('should generate different puzzles with different seeds', () {
+      final pieces1 = PuzzleGenerator.generatePuzzle(gridSize: 5, seed: 123);
+      final pieces2 = PuzzleGenerator.generatePuzzle(gridSize: 5, seed: 456);
+      
+      // 異なる結果が生成されることを確認（確率的テスト）
+      bool isDifferent = false;
+      if (pieces1.length != pieces2.length) {
+        isDifferent = true;
+      } else {
+        for (int i = 0; i < pieces1.length; i++) {
+          if (pieces1[i].cells.length != pieces2[i].cells.length) {
+            isDifferent = true;
+            break;
+          }
+        }
+      }
+      
+      expect(isDifferent, isTrue);
+    });
+  });
+}
+
+---
+
+# test/widget/screens/home_screen_test.dart
+import 'package:flutter/material.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:brain_blocks/screens/home_screen.dart';
+import 'package:brain_blocks/services/storage_service.dart';
+import '../../test_helpers/test_utils.dart';
+
+void main() {
+  group('HomeScreen Widget Tests', () {
+    late ProviderContainer container;
+
+    setUp(() async {
+      await TestUtils.setupTestEnvironment();
+      container = ProviderContainer();
+    });
+
+    tearDown(() {
+      container.dispose();
+    });
+
+    testWidgets('should display app title and main buttons', (tester) async {
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: const MaterialApp(
+            home: HomeScreen(),
+          ),
+        ),
+      );
+
+      // アプリタイトルの確認
+      expect(find.text('ブレインブロックス'), findsOneWidget);
+      
+      // メインボタンの確認
+      expect(find.text('ゲーム開始'), findsOneWidget);
+      expect(find.text('設定'), findsOneWidget);
+      expect(find.text('ヘルプ'), findsOneWidget);
+    });
+
+    testWidgets('should navigate to level select when game start is tapped', (tester) async {
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: MaterialApp(
+            home: const HomeScreen(),
+            routes: {
+              '/level_select': (context) => const Scaffold(
+                body: Text('Level Select Screen'),
+              ),
+            },
+          ),
+        ),
+      );
+
+      await tester.tap(find.text('ゲーム開始'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Level Select Screen'), findsOneWidget);
+    });
+
+    testWidgets('should show stats card with correct information', (tester) async {
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: const MaterialApp(
+            home: HomeScreen(),
+          ),
+        ),
+      );
+
+      // 統計情報カードの確認
+      expect(find.text('統計情報'), findsOneWidget);
+      expect(find.text('総プレイ回数'), findsOneWidget);
+      expect(find.text('クリア率'), findsOneWidget);
+    });
+  });
+}
+
+---
+
+# test/widget/widgets/game_board_widget_test.dart
+import 'package:flutter/material.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:brain_blocks/widgets/game_board_widget.dart';
+import 'package:brain_blocks/models/game_state.dart';
+import 'package:brain_blocks/models/puzzle_piece.dart';
+import 'package:brain_blocks/services/puzzle_generator.dart';
+import '../../test_helpers/mock_data.dart';
+
+void main() {
+  group('GameBoardWidget Tests', () {
+    testWidgets('should render game board correctly', (tester) async {
+      final gameState = MockData.createMockGameState();
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: GameBoardWidget(
+              gameState: gameState,
+              onPiecePlaced: (pieceId, position) {},
+            ),
+          ),
+        ),
+      );
+
+      // ゲーム盤面が描画されることを確認
+      expect(find.byType(CustomPaint), findsAtLeastNWidgets(1));
+    });
+
+    testWidgets('should handle piece drag and drop', (tester) async {
+      final gameState = MockData.createMockGameState();
+      String? placedPieceId;
+      PiecePosition? placedPosition;
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: GameBoardWidget(
+              gameState: gameState,
+              onPiecePlaced: (pieceId, position) {
+                placedPieceId = pieceId;
+                placedPosition = position;
+              },
+            ),
+          ),
+        ),
+      );
+
+      // DragTargetが存在することを確認
+      expect(find.byType(DragTarget<String>), findsOneWidget);
+    });
+
+    testWidgets('should show hint when hintPieceId is provided', (tester) async {
+      final gameState = MockData.createMockGameState();
+      final animationController = AnimationController(
+        duration: const Duration(seconds: 1),
+        vsync: const TestVSync(),
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: GameBoardWidget(
+              gameState: gameState,
+              hintPieceId: gameState.pieces.first.id,
+              hintAnimation: animationController,
+              onPiecePlaced: (pieceId, position) {},
+            ),
+          ),
+        ),
+      );
+
+      // ヒント表示用のCustomPaintが追加されることを確認
+      expect(find.byType(CustomPaint), findsAtLeastNWidgets(2));
+    });
+  });
+}
+
+---
+
+# test/integration/game_flow_test.dart
+import 'package:flutter/material.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:integration_test/integration_test.dart';
+import 'package:brain_blocks/main.dart' as app;
+import 'package:brain_blocks/services/storage_service.dart';
+
+void main() {
+  IntegrationTestWidgetsFlutterBinding.ensureInitialized();
+
+  group('Game Flow Integration Tests', () {
+    testWidgets('complete game flow from start to finish', (tester) async {
+      // アプリ起動
+      await StorageService.init();
+      app.main();
+      await tester.pumpAndSettle();
+
+      // ホーム画面の確認
+      expect(find.text('ブレインブロックス'), findsOneWidget);
+
+      // ゲーム開始ボタンをタップ
+      await tester.tap(find.text('ゲーム開始'));
+      await tester.pumpAndSettle();
+
+      // レベル選択画面の確認
+      expect(find.text('難易度選択'), findsOneWidget);
+
+      // 初級を選択
+      await tester.tap(find.text('初級 (5×5)'));
+      await tester.pumpAndSettle();
+
+      // ゲーム画面の確認
+      expect(find.text('手数'), findsOneWidget);
+      expect(find.text('時間'), findsOneWidget);
+
+      // ピーストレイの確認
+      expect(find.text('ピース'), findsOneWidget);
+
+      // リセットボタンのテスト
+      await tester.tap(find.byIcon(Icons.refresh));
+      await tester.pumpAndSettle();
+      
+      if (find.text('ゲームリセット').evaluate().isNotEmpty) {
+        await tester.tap(find.text('リセット'));
+        await tester.pumpAndSettle();
+      }
+
+      // 一時停止ボタンのテスト
+      await tester.tap(find.byIcon(Icons.pause));
+      await tester.pumpAndSettle();
+
+      expect(find.text('一時停止'), findsOneWidget);
+      
+      await tester.tap(find.text('ゲーム再開'));
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets('settings flow', (tester) async {
+      await StorageService.init();
+      app.main();
+      await tester.pumpAndSettle();
+
+      // 設定画面への遷移
+      await tester.tap(find.text('設定'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('設定'), findsOneWidget);
+
+      // ゲーム設定の確認
+      expect(find.text('ゲーム設定'), findsOneWidget);
+      expect(find.text('サウンド'), findsOneWidget);
+      expect(find.text('触覚フィードバック'), findsOneWidget);
+
+      // サウンド設定の切り替え
+      final soundSwitch = find.byType(Switch).first;
+      await tester.tap(soundSwitch);
+      await tester.pumpAndSettle();
+
+      // 戻るボタン
+      await tester.tap(find.byIcon(Icons.arrow_back));
+      await tester.pumpAndSettle();
+
+      expect(find.text('ブレインブロックス'), findsOneWidget);
+    });
+
+    testWidgets('help screen flow', (tester) async {
+      await StorageService.init();
+      app.main();
+      await tester.pumpAndSettle();
+
+      // ヘルプ画面への遷移
+      await tester.tap(find.text('ヘルプ'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('ヘルプ'), findsOneWidget);
+      expect(find.text('ゲームの目的'), findsOneWidget);
+      expect(find.text('基本操作'), findsOneWidget);
+
+      // 戻るボタン
+      await tester.tap(find.byIcon(Icons.arrow_back));
+      await tester.pumpAndSettle();
+
+      expect(find.text('ブレインブロックス'), findsOneWidget);
+    });
+  });
+}
+
+---
+
+# test/test_helpers/test_utils.dart
+import 'package:flutter_test/flutter_test.dart';
+import 'package:hive_flutter/hive_flutter.dart';
+import 'package:brain_blocks/models/app_settings.dart';
+
+class TestUtils {
+  static Future<void> setupTestEnvironment() async {
+    TestWidgetsFlutterBinding.ensureInitialized();
+    
+    // テスト用Hiveセットアップ
+    Hive.init('./test/temp');
+    Hive.registerAdapter(AppSettingsAdapter());
+  }
+
+  static Future<void> cleanupTestEnvironment() async {
+    await Hive.deleteFromDisk();
+  }
+}
+
+extension WidgetTesterExtensions on WidgetTester {
+  Future<void> pumpUntilFound(
+    Finder finder, {
+    Duration timeout = const Duration(seconds: 10),
+  }) async {
+    bool timerDone = false;
+    final timer = Timer(timeout, () => timerDone = true);
+    
+    while (timerDone != true) {
+      await pump();
+      
+      if (any(finder)) {
+        timer.cancel();
+        return;
+      }
+      
+      await Future.delayed(const Duration(milliseconds: 100));
+    }
+    
+    timer.cancel();
+    throw Exception('Timed out waiting for $finder');
+  }
+}
+
+---
+
+# test/test_helpers/mock_data.dart
+import 'package:flutter/material.dart';
+import 'package:brain_blocks/models/game_state.dart';
+import 'package:brain_blocks/models/puzzle_piece.dart';
+import 'package:brain_blocks/models/app_settings.dart';
+
+class MockData {
+  static GameState createMockGameState({
+    GameDifficulty difficulty = GameDifficulty.easy,
+    GameStatus status = GameStatus.playing,
+  }) {
+    final pieces = [
+      PuzzlePiece(
+        id: 'piece-1',
+        cells: const [
+          PiecePosition(0, 0),
+          PiecePosition(1, 0),
+        ],
+        color: Colors.blue,
+      ),
+      PuzzlePiece(
+        id: 'piece-2',
+        cells: const [
+          PiecePosition(0, 0),
+          PiecePosition(0, 1),
+          PiecePosition(1, 1),
+        ],
+        color: Colors.red,
+      ),
+      PuzzlePiece(
+        id: 'piece-3',
+        cells: const [
+          PiecePosition(0, 0),
+          PiecePosition(1, 0),
+          PiecePosition(2, 0),
+        ],
+        color: Colors.green,
+      ),
+    ];
+
+    return GameState(
+      gameId: 'test-game',
+      settings: GameSettings(
+        difficulty: difficulty,
+        mode: GameMode.unlimited,
+      ),
+      pieces: pieces,
+      status: status,
+    );
+  }
+
+  static AppSettings createMockAppSettings() {
+    return AppSettings(
+      soundEnabled: true,
+      hapticsEnabled: true,
+      colorBlindFriendly: false,
+      defaultDifficulty: 'easy',
+      adFree: false,
+      personalizedAds: true,
+      themeMode: 0,
+    );
+  }
+
+  static List<PuzzlePiece> createMockPieces() {
+    return [
+      PuzzlePiece(
+        id: 'mock-1',
+        cells: const [PiecePosition(0, 0), PiecePosition(1, 0)],
+        color: Colors.blue,
+      ),
+      PuzzlePiece(
+        id: 'mock-2',
+        cells: const [
+          PiecePosition(0, 0),
+          PiecePosition(0, 1),
+          PiecePosition(1, 0),
+        ],
+        color: Colors.red,
+      ),
+    ];
+  }
+}
+
+---
+
+# lib/main_production.dart (本番用統合ファイル)
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
+
+// Services
+import 'services/storage_service.dart';
+import 'services/admob_service.dart';
+import 'services/audio_service.dart';
+
+// Providers
+import 'providers/settings_providers.dart';
+
+// Screens
+import 'screens/home_screen.dart';
+
+// Utils
+import 'utils/error_handler.dart';
+import 'utils/performance_monitor.dart';
+import 'utils/app_lifecycle.dart';
+
+// Localization
+import 'l10n/app_localizations.dart';
+
+void main() async {
+  // 初期化
+  WidgetsFlutterBinding.ensureInitialized();
+  
+  // エラーハンドリング設定
+  ErrorHandler.initialize();
+  
+  // システムUI設定
+  await _setupSystemUI();
+  
+  // サービス初期化
+  await _initializeServices();
+  
+  // アプリ起動
+  runApp(
+    const ProviderScope(
+      child: BrainBlocksApp(),
+    ),
+  );
+}
+
+Future<void> _setupSystemUI() async {
+  // ステータスバー設定
+  SystemChrome.setSystemUIOverlayStyle(
+    const SystemUiOverlayStyle(
+      statusBarColor: Colors.transparent,
+      statusBarIconBrightness: Brightness.light,
+      systemNavigationBarColor: Colors.white,
+      systemNavigationBarIconBrightness: Brightness.dark,
+    ),
+  );
+  
+  // 画面向き設定
+  await SystemChrome.setPreferredOrientations([
+    DeviceOrientation.portraitUp,
+    DeviceOrientation.portraitDown,
+  ]);
+}
+
+Future<void> _initializeServices() async {
+  try {
+    // ローカルストレージ
+    await StorageService.init();
+    
+    // AdMob
+    await AdMobService.instance.initialize();
+    
+    // パフォーマンス監視（デバッグビルドのみ）
+    PerformanceMonitor.instance.startMonitoring();
+    
+    print('全サービスの初期化が完了しました');
+  } catch (e) {
+    ErrorHandler.reportError('サービス初期化エラー', e);
+  }
+}
+
+class BrainBlocksApp extends ConsumerStatefulWidget {
+  const BrainBlocksApp({super.key});
+
+  @override
+  ConsumerState<BrainBlocksApp> createState() => _BrainBlocksAppState();
+}
+
+class _BrainBlocksAppState extends ConsumerState<BrainBlocksApp> {
+  late AppLifecycleHandler _lifecycleHandler;
+
+  @override
+  void initState() {
+    super.initState();
+    
+    // ライフサイクル監視
+    _lifecycleHandler = AppLifecycleHandler(ref);
+    WidgetsBinding.instance.addObserver(_lifecycleHandler);
+    
+    // 音声サービス初期化
+    AudioService.instance.initialize(ref);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(_lifecycleHandler);
+    PerformanceMonitor.instance.stopMonitoring();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final appSettings = ref.watch(appSettingsProvider);
+    
+    return MaterialApp(
+      title: 'ブレインブロックス',
+      debugShowCheckedModeBanner: false,
+      
+      // テーマ設定
+      theme: _buildLightTheme(appSettings.colorBlindFriendly),
+      darkTheme: _buildDarkTheme(appSettings.colorBlindFriendly),
+      themeMode: appSettings.themeModeEnum,
+      
+      // 国際化設定
+      localizationsDelegates: const [
+        AppLocalizations.delegate,
+        GlobalMaterialLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
+      ],
+      supportedLocales: const [
+        Locale('ja', 'JP'),
+        Locale('en', 'US'),
+        Locale('ko', 'KR'),
+        Locale('zh', 'CN'),
+        Locale('zh', 'TW'),
+        Locale('es', 'ES'),
+        Locale('pt', 'PT'),
+        Locale('de', 'DE'),
+        Locale('it', 'IT'),
+      ],
+      
+      home: const HomeScreen(),
+      
+      // グローバルエラーハンドリング
+      builder: (context, child) {
+        ErrorWidget.builder = (FlutterErrorDetails details) {
+          return Scaffold(
+            body: Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Icon(
+                    Icons.error_outline,
+                    size: 64,
+                    color: Colors.red,
+                  ),
+                  const SizedBox(height: 16),
+                  const Text(
+                    'エラーが発生しました',
+                    style: TextStyle(fontSize: 18),
+                  ),
+                  const SizedBox(height: 8),
+                  ElevatedButton(
+                    onPressed: () {
+                      // アプリ再起動
+                      SystemNavigator.pop();
+                    },
+                    child: const Text('アプリを再起動'),
+                  ),
+                ],
+              ),
+            ),
+          );
+        };
+        
+        return child ?? const SizedBox.shrink();
+      },
+    );
+  }
+
+  ThemeData _buildLightTheme(bool colorBlindFriendly) {
+    // テーマ構築ロジック（前回と同じ）
+    return ThemeData(
+      useMaterial3: true,
+      primarySwatch: Colors.blue,
+      fontFamily: 'NotoSansJP',
+    );
+  }
+
+  ThemeData _buildDarkTheme(bool colorBlindFriendly) {
+    // ダークテーマ構築ロジック
+    return ThemeData(
+      useMaterial3: true,
+      brightness: Brightness.dark,
+      fontFamily: 'NotoSansJP',
+    );
+  }
+}
+
+---
+
+# 開発・デプロイ用スクリプト
+
+## scripts/build_release.sh
+#!/bin/bash
+
+echo "🚀 ブレインブロックス リリースビルド開始"
+
+# 依存関係の更新
+echo "📦 依存関係を更新中..."
+flutter pub get
+
+# コード生成
+echo "🔧 コード生成中..."
+flutter packages pub run build_runner build --delete-conflicting-outputs
+
+# コード解析
+echo "🔍 コード解析中..."
+flutter analyze
+if [ $? -ne 0 ]; then
+    echo "❌ コード解析でエラーが発見されました"
+    exit 1
+fi
+
+# テスト実行
+echo "🧪 テスト実行中..."
+flutter test
+if [ $? -ne 0 ]; then
+    echo "❌ テストが失敗しました"
+    exit 1
+fi
+
+# Android APK ビルド
+echo "🤖 Android APK ビルド中..."
+flutter build apk --release --split-per-abi
+
+# Android App Bundle ビルド
+echo "📱 Android App Bundle ビルド中..."
+flutter build appbundle --release
+
+# iOS ビルド（macOSの場合）
+if [[ "$OSTYPE" == "darwin"* ]]; then
+    echo "🍎 iOS ビルド中..."
+    flutter build ios --release --no-codesign
+fi
+
+echo "✅ リリースビルド完了！"
+echo "📁 出力ディレクトリ: build/"
+
+## scripts/setup_dev.sh  
+#!/bin/bash
+
+echo "🛠️ ブレインブロックス 開発環境セットアップ"
+
+# Flutter バージョン確認
+flutter --version
+
+# 依存関係インストール
+echo "📦 依存関係をインストール中..."
+flutter pub get
+
+# コード生成
+echo "🔧 初回コード生成中..."
+flutter packages pub run build_runner build
+
+# Android ライセンス同意
+echo "📜 Android ライセンス確認中..."
+flutter doctor --android-licenses
+
+# iOS 設定（macOSの場合）
+if [[ "$OSTYPE" == "darwin"* ]]; then
+    echo "🍎 iOS 設定中..."
+    cd ios && pod install && cd ..
+fi
+
+# プロジェクト構成確認
+echo "📋 プロジェクト構成確認中..."
+flutter doctor -v
+
+echo "✅ 開発環境セットアップ完了！"
+echo "▶️ 開発サーバー起動: flutter run"
+
+import 'dart:async';
+
+---
+
+# README.md (最終版)
+# ブレインブロックス (BrainBlocks)
+
+## 📝 概要
+ランダムに生成されるピースパズルゲーム。正方形の盤面にピースを隙間なく配置することが目的の脳トレアプリです。
+
+## ✨ 主な機能
+- **ランダムピース生成**: 毎回異なるパズルで無限に楽しめる
+- **3つの難易度**: 5×5, 7×7, 10×10 の段階的な挑戦
+- **直感的操作**: ドラッグ＆ドロップとタップ回転
+- **ヒント機能**: 広告視聴でヒント取得
+- **統計機能**: プレイ記録とベストタイム管理
+- **アクセシビリティ**: 色覚バリアフリー対応
+- **多言語対応**: 9言語サポート
+
+## 🛠️ 技術構成
+- **フレームワーク**: Flutter 3.32 (beta)
+- **状態管理**: Riverpod 2.6
+- **ローカルDB**: Hive
+- **広告**: Google AdMob
+- **アニメーション**: Lottie, Rive
+- **国際化**: Flutter Intl
+
+## 📁 プロジェクト構成
+```
+lib/
+├── main.dart                    # エントリーポイント
+├── models/                      # データモデル
+├── providers/                   # 状態管理
+├── services/                    # サービス層
+├── screens/                     # 画面
+├── widgets/                     # ウィジェット
+├── utils/                       # ユーティリティ
+└── l10n/                       # 国際化
+```
+
+## 🚀 セットアップ手順
+1. **リポジトリクローン**
+   ```bash
+   git clone [repository-url]
+   cd brain_blocks
+   ```
+
+2. **開発環境セットアップ**
+   ```bash
+   chmod +x scripts/setup_dev.sh
+   ./scripts/setup_dev.sh
+   ```
+
+3. **開発実行**
+   ```bash
+   flutter run
+   ```
+
+## 🧪 テスト実行
+```bash
+# 単体テスト
+flutter test
+
+# ウィジェットテスト
+flutter test test/widget/
+
+# 統合テスト
+flutter test integration_test/
+```
+
+## 📱 ビルド方法
+```bash
+# リリースビルド
+chmod +x scripts/build_release.sh
+./scripts/build_release.sh
+
+# 個別ビルド
+flutter build apk --release
+flutter build appbundle --release
+flutter build ios --release
+```
+
+## 🌟 今後の予定
+- V2: 多角形盤面、オンラインランキング
+- V3: ユーザー生成コンテンツ、PvP対戦
+- クロスプラットフォーム展開
+
+## 📄 ライセンス
+MIT License
+
+---
+
+このプロジェクトは、技術的な完成度とユーザー体験の両方を重視して設計されています。モジュラー設計により、機能追加や保守が容易な構造となっています。

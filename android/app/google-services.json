@@ -1,0 +1,48 @@
+{
+  "project_info": {
+    "project_number": "1065041854808",
+    "project_id": "mk-project-brain-blocks",
+    "storage_bucket": "mk-project-brain-blocks.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1065041854808:android:92f026125728a8a80ee52d",
+        "android_client_info": {
+          "package_name": "com.mkproject.brain_blocks"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAqxlwlaN-9q4ZnDhEYNhZ6FpBrjL1hifQ"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1065041854808:android:62dfb0ed6d2e34170ee52d",
+        "android_client_info": {
+          "package_name": "com.mkproject.brain_blocks.debug"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAqxlwlaN-9q4ZnDhEYNhZ6FpBrjL1hifQ"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

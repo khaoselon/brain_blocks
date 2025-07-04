@@ -1,4 +1,4 @@
-// lib/screens/game_screen.dart - ピース除去機能対応版
+// lib/screens/game_screen.dart - 不具合修正版
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -26,6 +26,11 @@ class _GameScreenState extends ConsumerState<GameScreen>
   String? _hintPieceId;
   bool _hasCompletedFirstGame = false;
 
+  // 🔥 修正：広告処理中フラグ
+  bool _isProcessingAd = false;
+  // 🔥 修正：ダイアログ表示中フラグ
+  bool _isDialogShowing = false;
+
   @override
   void initState() {
     super.initState();
@@ -36,7 +41,13 @@ class _GameScreenState extends ConsumerState<GameScreen>
 
     // ゲーム開始
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      ref.read(gameStateProvider.notifier).startNewGame();
+      try {
+        ref.read(gameStateProvider.notifier).startNewGame();
+        print('✅ 新しいゲーム開始');
+      } catch (e) {
+        print('❌ ゲーム開始エラー: $e');
+        _showErrorMessage('ゲーム開始に失敗しました');
+      }
     });
   }
 
@@ -65,7 +76,12 @@ class _GameScreenState extends ConsumerState<GameScreen>
         foregroundColor: Colors.white,
         elevation: 0,
         actions: [
-          IconButton(onPressed: _showPauseMenu, icon: const Icon(Icons.pause)),
+          IconButton(
+            onPressed: _isDialogShowing
+                ? null
+                : _showPauseMenu, // 🔥 修正：ダイアログ表示中は無効
+            icon: const Icon(Icons.pause),
+          ),
         ],
       ),
       body: SafeArea(
@@ -117,7 +133,7 @@ class _GameScreenState extends ConsumerState<GameScreen>
                   hintPieceId: _hintPieceId,
                   hintAnimation: _hintAnimationController,
                   onPiecePlaced: _onPiecePlaced,
-                  onPieceRemoved: _onPieceRemoved, // 🔥 新機能
+                  onPieceRemoved: _onPieceRemoved, // 🔥 修正：ピース除去機能
                 ),
               ),
             ),
@@ -173,7 +189,7 @@ class _GameScreenState extends ConsumerState<GameScreen>
                     hintPieceId: _hintPieceId,
                     hintAnimation: _hintAnimationController,
                     onPiecePlaced: _onPiecePlaced,
-                    onPieceRemoved: _onPieceRemoved, // 🔥 新機能
+                    onPieceRemoved: _onPieceRemoved, // 🔥 修正
                   ),
                 ),
               ),
@@ -202,10 +218,20 @@ class _GameScreenState extends ConsumerState<GameScreen>
     switch (current.status) {
       case GameStatus.completed:
         _onGameCompleted();
-        _showResultDialog(true);
+        // 🔥 修正：少し遅延してからダイアログ表示
+        Future.delayed(const Duration(milliseconds: 500), () {
+          if (mounted && !_isDialogShowing) {
+            _showResultDialog(true);
+          }
+        });
         break;
       case GameStatus.failed:
-        _showResultDialog(false);
+        // 🔥 修正：少し遅延してからダイアログ表示
+        Future.delayed(const Duration(milliseconds: 500), () {
+          if (mounted && !_isDialogShowing) {
+            _showResultDialog(false);
+          }
+        });
         break;
       default:
         break;
@@ -222,6 +248,8 @@ class _GameScreenState extends ConsumerState<GameScreen>
   }
 
   void _showATTDialogIfNeeded() {
+    if (_isDialogShowing) return; // 🔥 修正：重複防止
+
     final attService = ref.read(attServiceProvider);
     if (attService.currentStatus == ATTStatus.notDetermined) {
       _showATTExplanationDialog();
@@ -229,12 +257,32 @@ class _GameScreenState extends ConsumerState<GameScreen>
   }
 
   void _showATTExplanationDialog() {
+    if (_isDialogShowing) return; // 🔥 修正：重複防止
+
+    setState(() {
+      _isDialogShowing = true;
+    });
+
     showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (context) =>
-          ATTExplanationDialog(onAccept: () {}, onDecline: () {}),
-    );
+      builder: (context) => ATTExplanationDialog(
+        onAccept: () {
+          setState(() {
+            _isDialogShowing = false;
+          });
+        },
+        onDecline: () {
+          setState(() {
+            _isDialogShowing = false;
+          });
+        },
+      ),
+    ).then((_) {
+      setState(() {
+        _isDialogShowing = false;
+      });
+    });
   }
 
   /// ピース配置処理
@@ -244,8 +292,6 @@ class _GameScreenState extends ConsumerState<GameScreen>
     try {
       ref.read(gameStateProvider.notifier).placePiece(pieceId, position);
       HapticFeedback.lightImpact();
-
-      // 配置成功のフィードバック
       _showSuccessMessage('ピースを配置しました！');
     } catch (e) {
       print('❌ ピース配置エラー: $e');
@@ -254,15 +300,13 @@ class _GameScreenState extends ConsumerState<GameScreen>
     }
   }
 
-  /// 🔥 新機能：ピース除去処理
+  /// 🔥 修正：ピース除去処理
   void _onPieceRemoved(String pieceId) {
     print('🔄 ピース除去コールバック: $pieceId');
 
     try {
       ref.read(gameStateProvider.notifier).removePiece(pieceId);
       HapticFeedback.mediumImpact();
-
-      // 除去成功のフィードバック
       _showInfoMessage('ピースを取り外しました');
     } catch (e) {
       print('❌ ピース除去エラー: $e');
@@ -277,11 +321,14 @@ class _GameScreenState extends ConsumerState<GameScreen>
   }
 
   void _onPieceRotated(String pieceId) {
-    ref.read(gameStateProvider.notifier).rotatePiece(pieceId);
-    HapticFeedback.selectionClick();
-
-    // 回転フィードバック
-    _showInfoMessage('ピースを回転しました');
+    try {
+      ref.read(gameStateProvider.notifier).rotatePiece(pieceId);
+      HapticFeedback.selectionClick();
+      _showInfoMessage('ピースを回転しました');
+    } catch (e) {
+      print('❌ ピース回転エラー: $e');
+      _showErrorMessage('ピース回転に失敗しました');
+    }
   }
 
   /// 🎉 成功メッセージ表示
@@ -330,39 +377,67 @@ class _GameScreenState extends ConsumerState<GameScreen>
   }
 
   void _useHint() async {
+    if (_isProcessingAd) return; // 🔥 修正：広告処理中は無効
+
     final gameState = ref.read(gameStateProvider);
     final unplacedPieces = gameState.pieces.where((p) => !p.isPlaced).toList();
 
     if (unplacedPieces.isNotEmpty) {
-      final adService = ref.read(admobServiceProvider);
-      final rewardEarned = await adService.showRewardedAd();
+      setState(() {
+        _isProcessingAd = true;
+      });
 
-      if (rewardEarned) {
-        setState(() {
-          _hintPieceId = unplacedPieces.first.id;
-        });
+      try {
+        final adService = ref.read(admobServiceProvider);
+        final rewardEarned = await adService.showRewardedAd();
 
-        _hintAnimationController.forward().then((_) {
-          _hintAnimationController.reverse().then((_) {
-            setState(() {
-              _hintPieceId = null;
+        if (rewardEarned) {
+          setState(() {
+            _hintPieceId = unplacedPieces.first.id;
+          });
+
+          _hintAnimationController.forward().then((_) {
+            _hintAnimationController.reverse().then((_) {
+              setState(() {
+                _hintPieceId = null;
+              });
             });
           });
-        });
 
-        ref.read(gameStateProvider.notifier).useHint();
-        _showInfoMessage('ヒントを表示しました！');
+          ref.read(gameStateProvider.notifier).useHint();
+          _showInfoMessage('ヒントを表示しました！');
+        }
+      } catch (e) {
+        print('❌ ヒント広告エラー: $e');
+        _showErrorMessage('ヒント表示に失敗しました');
+      } finally {
+        setState(() {
+          _isProcessingAd = false;
+        });
       }
     } else {
       _showInfoMessage('配置可能なピースがありません');
     }
   }
 
+  /// 🔥 修正：リセット機能の改善
   void _resetGame() {
+    if (_isDialogShowing) return; // 🔥 修正：ダイアログ表示中は無効
+
+    setState(() {
+      _isDialogShowing = true;
+    });
+
     showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('ゲームリセット'),
+        title: const Row(
+          children: [
+            Icon(Icons.refresh, color: Color(0xFF2E86C1)),
+            SizedBox(width: 8),
+            Text('ゲームリセット'),
+          ],
+        ),
         content: const Text('現在の進行状況がリセットされます。\nよろしいですか？'),
         actions: [
           TextButton(
@@ -371,77 +446,176 @@ class _GameScreenState extends ConsumerState<GameScreen>
           ),
           ElevatedButton(
             onPressed: () => Navigator.of(context).pop(true),
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF2E86C1),
+              foregroundColor: Colors.white,
+            ),
             child: const Text('リセット'),
           ),
         ],
       ),
     ).then((confirmed) {
+      setState(() {
+        _isDialogShowing = false;
+      });
+
       if (confirmed == true) {
-        ref.read(gameStateProvider.notifier).resetGame();
-        _showInfoMessage('ゲームをリセットしました');
+        try {
+          // 🔥 修正：状態をリセットしてから新しいゲーム開始
+          ref.read(gameStateProvider.notifier).resetGame();
+          _showInfoMessage('ゲームをリセットしました');
+          print('✅ ゲームリセット成功');
+        } catch (e) {
+          print('❌ ゲームリセットエラー: $e');
+          _showErrorMessage('ゲームリセットに失敗しました');
+        }
       }
     });
   }
 
+  /// 🔥 修正：ポーズメニューの改善
   void _showPauseMenu() {
-    ref.read(gameStateProvider.notifier).pauseGame();
+    if (_isDialogShowing || _isProcessingAd) return; // 🔥 修正：重複防止
+
+    try {
+      ref.read(gameStateProvider.notifier).pauseGame();
+      print('✅ ゲーム一時停止');
+    } catch (e) {
+      print('❌ ゲーム一時停止エラー: $e');
+    }
+
+    setState(() {
+      _isDialogShowing = true;
+    });
 
     showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (context) => AlertDialog(
-        title: const Row(
-          children: [
-            Icon(Icons.pause_circle, color: Color(0xFF2E86C1)),
-            SizedBox(width: 8),
-            Text('一時停止'),
-          ],
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            _buildPauseMenuItem(
-              icon: Icons.play_arrow,
-              title: 'ゲーム再開',
-              onTap: () {
-                Navigator.of(context).pop();
-                ref.read(gameStateProvider.notifier).resumeGame();
-                _showInfoMessage('ゲームを再開しました');
-              },
-            ),
-            _buildPauseMenuItem(
-              icon: Icons.refresh,
-              title: 'リスタート',
-              onTap: () {
-                Navigator.of(context).pop();
-                _resetGame();
-              },
-            ),
-            _buildPauseMenuItem(
-              icon: Icons.settings,
-              title: '設定',
-              onTap: () {
-                Navigator.of(context).pop();
-                // 設定画面遷移（必要に応じて実装）
-              },
-            ),
-            _buildPauseMenuItem(
-              icon: Icons.home,
-              title: 'メニューに戻る',
-              onTap: () async {
-                Navigator.of(context).pop();
-                final adService = ref.read(admobServiceProvider);
-                await adService.showInterstitialAd();
-                if (mounted) {
+      builder: (context) => WillPopScope(
+        onWillPop: () async {
+          // 🔥 修正：戻るボタンで閉じる時の処理
+          _resumeGameFromPause();
+          return true;
+        },
+        child: AlertDialog(
+          title: const Row(
+            children: [
+              Icon(Icons.pause_circle, color: Color(0xFF2E86C1)),
+              SizedBox(width: 8),
+              Text('一時停止'),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _buildPauseMenuItem(
+                icon: Icons.play_arrow,
+                title: 'ゲーム再開',
+                onTap: () {
                   Navigator.of(context).pop();
-                }
-              },
-            ),
-          ],
+                  _resumeGameFromPause();
+                },
+              ),
+              _buildPauseMenuItem(
+                icon: Icons.refresh,
+                title: 'リスタート',
+                onTap: () {
+                  Navigator.of(context).pop();
+                  _resetGameFromPause();
+                },
+              ),
+              _buildPauseMenuItem(
+                icon: Icons.settings,
+                title: '設定',
+                onTap: () {
+                  Navigator.of(context).pop();
+                  _resumeGameFromPause();
+                  _showInfoMessage('設定機能は準備中です');
+                },
+              ),
+              _buildPauseMenuItem(
+                icon: Icons.home,
+                title: 'メニューに戻る',
+                onTap: () {
+                  Navigator.of(context).pop();
+                  _backToMenuFromPause();
+                },
+              ),
+            ],
+          ),
         ),
       ),
-    );
+    ).then((_) {
+      setState(() {
+        _isDialogShowing = false;
+      });
+    });
+  }
+
+  /// 🔥 新機能：ポーズから再開
+  void _resumeGameFromPause() {
+    try {
+      ref.read(gameStateProvider.notifier).resumeGame();
+      _showInfoMessage('ゲームを再開しました');
+      print('✅ ゲーム再開');
+    } catch (e) {
+      print('❌ ゲーム再開エラー: $e');
+      _showErrorMessage('ゲーム再開に失敗しました');
+    }
+  }
+
+  /// 🔥 新機能：ポーズからリセット
+  void _resetGameFromPause() {
+    // まず再開してからリセット処理
+    try {
+      ref.read(gameStateProvider.notifier).resumeGame();
+    } catch (e) {
+      print('⚠️ 再開処理でエラー: $e');
+    }
+
+    // リセット処理
+    Future.delayed(const Duration(milliseconds: 100), () {
+      _resetGame();
+    });
+  }
+
+  /// 🔥 修正：メニューに戻る処理の改善
+  void _backToMenuFromPause() async {
+    if (_isProcessingAd) return; // 🔥 修正：広告処理中は無効
+
+    setState(() {
+      _isProcessingAd = true;
+    });
+
+    try {
+      print('🏠 メニューに戻る処理開始');
+
+      // 先にゲームを再開状態にする
+      ref.read(gameStateProvider.notifier).resumeGame();
+
+      // 広告表示
+      final adService = ref.read(admobServiceProvider);
+      await adService.showInterstitialAd();
+
+      print('✅ 広告表示完了、画面遷移開始');
+
+      // 画面遷移
+      if (mounted) {
+        Navigator.of(context).pop();
+        print('✅ メニューに戻る処理完了');
+      }
+    } catch (e) {
+      print('❌ メニューに戻るエラー: $e');
+      if (mounted) {
+        _showErrorMessage('メニューに戻る処理でエラーが発生しました');
+        // エラー時でも画面遷移
+        Navigator.of(context).pop();
+      }
+    } finally {
+      setState(() {
+        _isProcessingAd = false;
+      });
+    }
   }
 
   /// ポーズメニューアイテム構築
@@ -450,15 +624,41 @@ class _GameScreenState extends ConsumerState<GameScreen>
     required String title,
     required VoidCallback onTap,
   }) {
-    return ListTile(
-      leading: Icon(icon, color: const Color(0xFF2E86C1)),
-      title: Text(title),
-      onTap: onTap,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+    return Container(
+      margin: const EdgeInsets.symmetric(vertical: 4),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(8),
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+          child: Row(
+            children: [
+              Icon(icon, color: const Color(0xFF2E86C1)),
+              const SizedBox(width: 12),
+              Text(
+                title,
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+              const Spacer(),
+              Icon(Icons.arrow_forward_ios, size: 16, color: Colors.grey[400]),
+            ],
+          ),
+        ),
+      ),
     );
   }
 
+  /// 🔥 修正：結果ダイアログ表示の改善
   void _showResultDialog(bool isSuccess) {
+    if (_isDialogShowing) return; // 🔥 修正：重複防止
+
+    setState(() {
+      _isDialogShowing = true;
+    });
+
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -467,19 +667,61 @@ class _GameScreenState extends ConsumerState<GameScreen>
         gameState: ref.read(gameStateProvider),
         onPlayAgain: () {
           Navigator.of(context).pop();
-          ref.read(gameStateProvider.notifier).startNewGame();
-          _showInfoMessage('新しいゲームを開始しました！');
+          _playAgainFromResult();
         },
-        onBackToMenu: () async {
+        onBackToMenu: () {
           Navigator.of(context).pop();
-          final adService = ref.read(admobServiceProvider);
-          await adService.showInterstitialAd();
-          if (mounted) {
-            Navigator.of(context).pop();
-          }
+          _backToMenuFromResult();
         },
       ),
-    );
+    ).then((_) {
+      setState(() {
+        _isDialogShowing = false;
+      });
+    });
+  }
+
+  /// 🔥 新機能：結果画面からもう一度プレイ
+  void _playAgainFromResult() {
+    try {
+      ref.read(gameStateProvider.notifier).startNewGame();
+      _showInfoMessage('新しいゲームを開始しました！');
+      print('✅ 新しいゲーム開始（結果画面から）');
+    } catch (e) {
+      print('❌ 新しいゲーム開始エラー: $e');
+      _showErrorMessage('新しいゲーム開始に失敗しました');
+    }
+  }
+
+  /// 🔥 新機能：結果画面からメニューに戻る
+  void _backToMenuFromResult() async {
+    if (_isProcessingAd) return;
+
+    setState(() {
+      _isProcessingAd = true;
+    });
+
+    try {
+      print('🏠 結果画面からメニューに戻る');
+
+      final adService = ref.read(admobServiceProvider);
+      await adService.showInterstitialAd();
+
+      if (mounted) {
+        Navigator.of(context).pop();
+        print('✅ 結果画面からメニューに戻る完了');
+      }
+    } catch (e) {
+      print('❌ 結果画面からメニューに戻るエラー: $e');
+      if (mounted) {
+        _showErrorMessage('メニューに戻る処理でエラーが発生しました');
+        Navigator.of(context).pop();
+      }
+    } finally {
+      setState(() {
+        _isProcessingAd = false;
+      });
+    }
   }
 }
 

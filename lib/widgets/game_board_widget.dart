@@ -1,4 +1,4 @@
-// lib/widgets/game_board_widget.dart - 完全修正版
+// lib/widgets/game_board_widget.dart - 不具合修正版
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../models/game_state.dart';
@@ -42,7 +42,9 @@ class _GameBoardWidgetState extends State<GameBoardWidget>
   // 🔥 修正：ダブルタップ検出の改善
   DateTime? _lastTapTime;
   String? _lastTappedPieceId;
-  static const Duration _doubleTapTimeout = Duration(milliseconds: 400);
+  static const Duration _doubleTapTimeout = Duration(
+    milliseconds: 600,
+  ); // 400ms→600msに延長
 
   @override
   void initState() {
@@ -145,10 +147,10 @@ class _GameBoardWidgetState extends State<GameBoardWidget>
                         // 🔥 改善：配置済みピース全体をドラッグ可能に
                         ..._buildPlacedPieceDragAreas(cellSize, gridSize),
 
-                        // 🔥 新機能：ピーストレイ戻しボタン
+                        // 🔥 修正：ピース除去ボタンの改善
                         if (_selectedPlacedPieceId != null &&
                             widget.onPieceRemoved != null)
-                          _buildRemoveButton(),
+                          _buildImprovedRemoveButton(),
 
                         // 操作ヘルプ
                         _buildInteractionHelp(),
@@ -193,25 +195,35 @@ class _GameBoardWidgetState extends State<GameBoardWidget>
   void _handlePlacedPieceTap(PuzzlePiece piece) {
     final now = DateTime.now();
 
-    // 🔥 修正：より厳密なダブルタップ検出
+    // 🔥 修正：より正確なダブルタップ検出
     final isDoubleTap =
         _lastTapTime != null &&
         _lastTappedPieceId == piece.id &&
-        now.difference(_lastTapTime!).inMilliseconds <
-            _doubleTapTimeout.inMilliseconds;
+        now.difference(_lastTapTime!) <= _doubleTapTimeout;
 
-    print('🎯 ピースタップ: ${piece.id}, ダブルタップ: $isDoubleTap');
-
-    _lastTapTime = now;
-    _lastTappedPieceId = piece.id;
+    print('🎯 ピースタップ: ${piece.id}');
+    print('   前回タップ時間: $_lastTapTime');
+    print('   現在時間: $now');
+    print(
+      '   時間差: ${_lastTapTime != null ? now.difference(_lastTapTime!).inMilliseconds : "null"}ms',
+    );
+    print('   ダブルタップ判定: $isDoubleTap');
 
     if (isDoubleTap && widget.onPieceRemoved != null) {
       // ダブルタップ: ピーストレイに戻す
       print('🔄 ダブルタップ検出 - ピースを除去: ${piece.id}');
       _removePieceToTray(piece.id);
+
+      // 🔥 重要：ダブルタップ後は状態をリセット
+      _lastTapTime = null;
+      _lastTappedPieceId = null;
     } else {
       // シングルタップ: 選択/選択解除
       _selectPlacedPiece(piece.id);
+
+      // 🔥 修正：タップ情報を正しく更新
+      _lastTapTime = now;
+      _lastTappedPieceId = piece.id;
     }
   }
 
@@ -231,19 +243,29 @@ class _GameBoardWidgetState extends State<GameBoardWidget>
 
     if (_selectedPlacedPieceId != null) {
       final message = widget.onPieceRemoved != null
-          ? 'ピースを選択しました（ダブルタップで除去）'
+          ? 'ピースを選択しました（ダブルタップまたは除去ボタンで除去）'
           : 'ピースを選択しました';
       _showMessage(message, Colors.blue);
     }
   }
 
-  /// ピースをトレイに戻す
+  /// 🔥 修正：ピースをトレイに戻す処理の改善
   void _removePieceToTray(String pieceId) {
     print('🔄 ピースをトレイに戻す: $pieceId');
-    widget.onPieceRemoved?.call(pieceId);
+
+    // 🔥 重要：先に選択状態をクリア
     _clearSelection();
-    HapticFeedback.mediumImpact();
-    _showMessage('ピースを取り外しました', Colors.orange);
+
+    // ピース除去コールバック実行
+    try {
+      widget.onPieceRemoved?.call(pieceId);
+      HapticFeedback.mediumImpact();
+      _showMessage('ピースを取り外しました', Colors.orange);
+      print('✅ ピース除去成功: $pieceId');
+    } catch (e) {
+      print('❌ ピース除去エラー: $e');
+      _showMessage('ピース除去に失敗しました', Colors.red);
+    }
   }
 
   /// 選択クリア
@@ -332,8 +354,7 @@ class _GameBoardWidgetState extends State<GameBoardWidget>
 
         onDragStarted: () {
           print('🚀 配置済みピース全体ドラッグ開始: ${piece.id}');
-          widget.onPieceRemoved?.call(piece.id);
-          _clearSelection();
+          _removePieceToTray(piece.id); // 🔥 修正：統一された除去処理
           HapticFeedback.lightImpact();
         },
 
@@ -388,21 +409,66 @@ class _GameBoardWidgetState extends State<GameBoardWidget>
     );
   }
 
-  /// 🔥 新機能：ピース除去ボタン
-  Widget _buildRemoveButton() {
+  /// 🔥 修正：改善されたピース除去ボタン
+  Widget _buildImprovedRemoveButton() {
     return Positioned(
-      bottom: 20,
-      right: 20,
-      child: FloatingActionButton.small(
-        onPressed: () {
-          if (_selectedPlacedPieceId != null) {
-            _removePieceToTray(_selectedPlacedPieceId!);
-          }
-        },
-        backgroundColor: Colors.red,
-        foregroundColor: Colors.white,
-        child: const Icon(Icons.delete_outline),
+      bottom: 16,
+      right: 16,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // 🔥 新機能：除去確認ボタン
+          FloatingActionButton.small(
+            heroTag: "remove_piece", // heroTag追加でエラー回避
+            onPressed: () {
+              if (_selectedPlacedPieceId != null) {
+                _showRemoveConfirmDialog();
+              }
+            },
+            backgroundColor: Colors.red,
+            foregroundColor: Colors.white,
+            tooltip: 'ピースを除去',
+            child: const Icon(Icons.delete_outline),
+          ),
+        ],
       ),
+    );
+  }
+
+  /// 🔥 新機能：除去確認ダイアログ
+  void _showRemoveConfirmDialog() {
+    if (_selectedPlacedPieceId == null) return;
+
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Row(
+            children: [
+              Icon(Icons.warning_amber, color: Colors.orange),
+              SizedBox(width: 8),
+              Text('ピース除去'),
+            ],
+          ),
+          content: const Text('選択したピースをトレイに戻しますか？'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('キャンセル'),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                Navigator.of(context).pop();
+                if (_selectedPlacedPieceId != null) {
+                  _removePieceToTray(_selectedPlacedPieceId!);
+                }
+              },
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+              child: const Text('除去', style: TextStyle(color: Colors.white)),
+            ),
+          ],
+        );
+      },
     );
   }
 
@@ -435,7 +501,11 @@ class _GameBoardWidgetState extends State<GameBoardWidget>
             ),
             if (widget.onPieceRemoved != null) ...[
               const Text(
-                '• ダブルタップ: 除去',
+                '• ダブルタップ: 即座に除去',
+                style: TextStyle(color: Colors.white, fontSize: 10),
+              ),
+              const Text(
+                '• 除去ボタン: 確認後除去',
                 style: TextStyle(color: Colors.white, fontSize: 10),
               ),
               const Text(
@@ -711,6 +781,10 @@ class _GameBoardWidgetState extends State<GameBoardWidget>
             ),
             Text(
               'Grid位置: ${_currentDragPosition?.toString() ?? "なし"}',
+              style: const TextStyle(color: Colors.white, fontSize: 10),
+            ),
+            Text(
+              '最終タップ時間: ${_lastTapTime?.millisecondsSinceEpoch ?? "なし"}',
               style: const TextStyle(color: Colors.white, fontSize: 10),
             ),
           ],

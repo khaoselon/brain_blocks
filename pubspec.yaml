@@ -2,17 +2,12 @@ name: brain_blocks
 description: "ランダムピースパズルゲーム - ブレインブロックス"
 publish_to: 'none' 
 version: 1.0.0+1
-
 environment:
   sdk: ^3.8.0-278.1.beta
-
 dependencies:
   flutter:
     sdk: flutter
-
   cupertino_icons: ^1.0.8
-
-
     # 状態管理
   flutter_riverpod: ^2.6.1
   riverpod_annotation: ^2.6.1
@@ -27,7 +22,7 @@ dependencies:
   app_tracking_transparency: ^2.0.5
   
   
-    # Firebase Core（必須）
+    # Firebase Core(必須)
   firebase_core: ^2.32.0
   
   # Firebase Analytics
@@ -41,9 +36,7 @@ dependencies:
   
   # Firebase Performance Monitoring
   firebase_performance: ^0.9.4+7
-
-
-  # ゲームエンジン（軽量利用）
+  # ゲームエンジン(軽量利用)
   flame: ^1.22.0
   
   # UI/アニメーション
@@ -63,13 +56,10 @@ dependencies:
   # デバッグ用
   logger: ^2.4.0
   
-
 dev_dependencies:
   flutter_test:
     sdk: flutter
-
   flutter_lints: ^5.0.0
-
     # コード生成
   riverpod_generator: ^2.4.0
   build_runner: ^2.4.13
@@ -78,12 +68,8 @@ dev_dependencies:
   
   # Hive用
   hive_generator: ^2.0.1
-
-
 flutter:
-
   uses-material-design: true
-
   assets:
     - assets/images/
     - assets/lottie/

@@ -16,12 +16,35 @@ class AppSettingsAdapter extends TypeAdapter<AppSettings> {
     final fields = <int, dynamic>{
       for (int i = 0; i < numOfFields; i++) reader.readByte(): reader.read(),
     };
-    return AppSettings();
+    return AppSettings(
+      soundEnabled: fields[0] as bool? ?? true,
+      hapticsEnabled: fields[1] as bool? ?? true,
+      colorBlindFriendly: fields[2] as bool? ?? false,
+      defaultDifficulty: fields[3] as String? ?? 'easy',
+      adFree: fields[4] as bool? ?? false,
+      personalizedAds: fields[5] as bool? ?? true,
+      themeMode: fields[6] as int? ?? 0,
+    );
   }
 
   @override
   void write(BinaryWriter writer, AppSettings obj) {
-    writer.writeByte(0);
+    writer
+      ..writeByte(7)
+      ..writeByte(0)
+      ..write(obj.soundEnabled)
+      ..writeByte(1)
+      ..write(obj.hapticsEnabled)
+      ..writeByte(2)
+      ..write(obj.colorBlindFriendly)
+      ..writeByte(3)
+      ..write(obj.defaultDifficulty)
+      ..writeByte(4)
+      ..write(obj.adFree)
+      ..writeByte(5)
+      ..write(obj.personalizedAds)
+      ..writeByte(6)
+      ..write(obj.themeMode);
   }
 
   @override

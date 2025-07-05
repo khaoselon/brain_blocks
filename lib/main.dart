@@ -1,4 +1,4 @@
-// lib/main.dart - 最終修正版（SharedPreferences対応・安定性強化）
+// lib/main.dart - 初期化処理改善版（確実なアプリ起動）
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -37,22 +37,56 @@ void main() async {
   // 🔥 修正：エラーハンドリング設定（最優先）
   ErrorHandler.initialize();
 
-  // 🔥 修正：Firebase初期化（エラーハンドリング強化）
-  FirebaseService? firebaseService;
+  // 🔥 修正：段階的初期化でエラー耐性を強化
+  bool firebaseInitialized = false;
+  bool storageInitialized = false;
+
+  // Firebase初期化（失敗してもアプリは継続）
   try {
-    firebaseService = FirebaseService.instance;
+    print('🔥 Firebase初期化開始');
+    final firebaseService = FirebaseService.instance;
     await firebaseService.initialize();
-    print('✅ Firebase初期化完了');
+
+    if (firebaseService.isInitialized) {
+      firebaseInitialized = true;
+      print('✅ Firebase初期化完了');
+    } else {
+      print('⚠️ Firebase初期化失敗（フォールバックモード）');
+    }
   } catch (e) {
-    print('⚠️ Firebase初期化失敗（続行可能）: $e');
-    // Firebase初期化失敗でもアプリは続行
+    print('❌ Firebase初期化エラー（アプリは継続）: $e');
+    firebaseInitialized = false;
   }
 
   // システムUI設定
   await _setupSystemUI();
 
-  // その他サービス初期化
-  await _initializeServices();
+  // ストレージ初期化（重要）
+  try {
+    await StorageService.init();
+    storageInitialized = true;
+    print('✅ Hiveストレージサービス初期化完了');
+  } catch (e) {
+    print('❌ Hiveストレージサービス初期化エラー: $e');
+    storageInitialized = false;
+
+    // ストレージ初期化失敗は深刻なので、リトライを試みる
+    try {
+      print('🔄 ストレージ初期化を再試行');
+      await Future.delayed(const Duration(milliseconds: 500));
+      await StorageService.init();
+      storageInitialized = true;
+      print('✅ ストレージ初期化再試行成功');
+    } catch (retryError) {
+      print('❌ ストレージ初期化再試行も失敗: $retryError');
+      // ストレージが使えなくても一時的にアプリを起動
+    }
+  }
+
+  // 初期化結果のレポート
+  print('📊 初期化結果:');
+  print('   Firebase: ${firebaseInitialized ? "✅" : "❌"}');
+  print('   Storage: ${storageInitialized ? "✅" : "❌"}');
 
   print('✅ アプリ初期化完了');
 
@@ -84,20 +118,6 @@ Future<void> _setupSystemUI() async {
   }
 }
 
-Future<void> _initializeServices() async {
-  try {
-    // 🔥 修正：Hiveベースのストレージ初期化
-    await StorageService.init();
-    print('✅ Hiveストレージサービス初期化完了');
-
-    print('✅ 全サービスの初期化が完了しました');
-  } catch (e) {
-    print('❌ サービス初期化エラー: $e');
-    ErrorHandler.reportError('サービス初期化エラー', e);
-    // エラーでもアプリは続行
-  }
-}
-
 class BrainBlocksApp extends ConsumerStatefulWidget {
   const BrainBlocksApp({super.key});
 
@@ -108,6 +128,7 @@ class BrainBlocksApp extends ConsumerStatefulWidget {
 class _BrainBlocksAppState extends ConsumerState<BrainBlocksApp> {
   late AppLifecycleHandler _lifecycleHandler;
   FirebaseService? _firebaseService;
+  bool _servicesInitialized = false;
 
   @override
   void initState() {
@@ -115,57 +136,101 @@ class _BrainBlocksAppState extends ConsumerState<BrainBlocksApp> {
 
     _firebaseService = FirebaseService.instance;
 
-    // 重要：サービス初期化の順序
+    // 重要：サービス初期化の順序（非同期で段階的に実行）
     WidgetsBinding.instance.addPostFrameCallback((_) async {
-      try {
-        // 1. 設定プロバイダーの初期化完了を待つ
-        await _waitForSettingsInitialization();
-
-        // 2. ATTサービス初期化（iOS のみ、AdMob より先）
-        await ATTService.instance.initialize(ref);
-
-        // 3. AdMob初期化（ATT状態を考慮）
-        await AdMobService.instance.initialize(ref: ref);
-
-        // 4. 音声サービス初期化
-        await AudioService.instance.initialize(ref);
-
-        // 5. パフォーマンス監視開始
-        PerformanceMonitor.instance.startMonitoring();
-
-        // 6. Firebase Analytics: アプリ起動（安全版）
-        await _logAppOpen();
-
-        // 7. Remote Configの値確認
-        _checkRemoteConfigFlags();
-
-        print('✅ 全サービス初期化完了');
-      } catch (e) {
-        print('❌ サービス初期化エラー: $e');
-        ErrorHandler.reportError('ポストフレーム初期化エラー', e);
-      }
+      await _initializeServices();
     });
-
-    // ライフサイクル監視
-    _lifecycleHandler = AppLifecycleHandler(ref);
-    WidgetsBinding.instance.addObserver(_lifecycleHandler);
   }
 
-  /// 🔥 新機能：設定プロバイダーの初期化完了を待つ
+  /// 🔥 修正：サービス初期化（エラー耐性強化）
+  Future<void> _initializeServices() async {
+    try {
+      print('🔧 アプリサービス初期化開始');
+
+      // 1. 設定プロバイダーの初期化完了を待つ（重要）
+      await _waitForSettingsInitialization();
+
+      // 2. ATTサービス初期化（iOS のみ、AdMob より先）
+      try {
+        await ATTService.instance.initialize(ref);
+        print('✅ ATTサービス初期化完了');
+      } catch (e) {
+        print('❌ ATTサービス初期化エラー（継続）: $e');
+      }
+
+      // 3. AdMob初期化（ATT状態を考慮）
+      try {
+        await AdMobService.instance.initialize(ref: ref);
+        print('✅ AdMobサービス初期化完了');
+      } catch (e) {
+        print('❌ AdMobサービス初期化エラー（継続）: $e');
+      }
+
+      // 4. 音声サービス初期化
+      try {
+        await AudioService.instance.initialize(ref);
+        print('✅ 音声サービス初期化完了');
+      } catch (e) {
+        print('❌ 音声サービス初期化エラー（継続）: $e');
+      }
+
+      // 5. パフォーマンス監視開始
+      try {
+        PerformanceMonitor.instance.startMonitoring();
+        print('✅ パフォーマンス監視開始');
+      } catch (e) {
+        print('❌ パフォーマンス監視開始エラー（継続）: $e');
+      }
+
+      // 6. Firebase Analytics: アプリ起動（安全版）
+      await _logAppOpen();
+
+      // 7. Remote Configの値確認
+      _checkRemoteConfigFlags();
+
+      setState(() {
+        _servicesInitialized = true;
+      });
+
+      print('✅ 全サービス初期化完了');
+    } catch (e) {
+      print('❌ サービス初期化エラー: $e');
+      ErrorHandler.reportError('サービス初期化エラー', e);
+
+      // エラーでも基本的なサービスは利用可能として続行
+      setState(() {
+        _servicesInitialized = true;
+      });
+    }
+
+    // ライフサイクル監視（最後に設定）
+    try {
+      _lifecycleHandler = AppLifecycleHandler(ref);
+      WidgetsBinding.instance.addObserver(_lifecycleHandler);
+      print('✅ ライフサイクル監視開始');
+    } catch (e) {
+      print('❌ ライフサイクル監視開始エラー: $e');
+    }
+  }
+
+  /// 🔥 修正：設定プロバイダーの初期化完了を待つ（タイムアウト強化）
   Future<void> _waitForSettingsInitialization() async {
-    const maxWaitTime = Duration(seconds: 5);
+    const maxWaitTime = Duration(seconds: 10); // 5秒→10秒に延長
     const checkInterval = Duration(milliseconds: 100);
     final startTime = DateTime.now();
 
+    print('⏳ 設定プロバイダー初期化待機開始');
+
     while (!ref.read(appSettingsProvider.notifier).isInitialized) {
       if (DateTime.now().difference(startTime) > maxWaitTime) {
-        print('⚠️ 設定初期化タイムアウト（続行）');
+        print('⚠️ 設定初期化タイムアウト（10秒）- 続行');
         break;
       }
       await Future.delayed(checkInterval);
     }
 
-    print('✅ 設定プロバイダー初期化完了確認');
+    final initializationTime = DateTime.now().difference(startTime);
+    print('✅ 設定プロバイダー初期化完了確認 (${initializationTime.inMilliseconds}ms)');
   }
 
   /// Firebase Analytics アプリ起動ログ（安全版）
@@ -181,6 +246,7 @@ class _BrainBlocksAppState extends ConsumerState<BrainBlocksApp> {
         parameters: {
           'app_version': '1.0.0',
           'platform': Theme.of(context).platform.name,
+          'services_initialized': _servicesInitialized,
         },
       );
       print('✅ Firebase Analytics ログ送信成功');
@@ -301,7 +367,69 @@ class _BrainBlocksAppState extends ConsumerState<BrainBlocksApp> {
         Locale('it', 'IT'),
       ],
 
-      home: const HomeScreen(),
+      // 🔥 修正：サービス初期化が完了してからホーム画面を表示
+      home: _servicesInitialized ? const HomeScreen() : _buildLoadingScreen(),
+    );
+  }
+
+  /// 🔥 新機能：ローディング画面
+  Widget _buildLoadingScreen() {
+    return Scaffold(
+      backgroundColor: const Color(0xFF2E86C1),
+      body: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            // アプリロゴ
+            Container(
+              width: 100,
+              height: 100,
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(20),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.2),
+                    blurRadius: 10,
+                    offset: const Offset(0, 5),
+                  ),
+                ],
+              ),
+              child: const Icon(
+                Icons.extension,
+                size: 50,
+                color: Color(0xFF2E86C1),
+              ),
+            ),
+
+            const SizedBox(height: 40),
+
+            // ローディングインジケーター
+            const CircularProgressIndicator(
+              valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+            ),
+
+            const SizedBox(height: 24),
+
+            // ローディングテキスト
+            const Text(
+              'ブレインブロックス',
+              style: TextStyle(
+                fontSize: 24,
+                fontWeight: FontWeight.bold,
+                color: Colors.white,
+              ),
+            ),
+
+            const SizedBox(height: 8),
+
+            const Text(
+              'アプリを初期化中...',
+              style: TextStyle(fontSize: 16, color: Colors.white70),
+            ),
+          ],
+        ),
+      ),
     );
   }
 

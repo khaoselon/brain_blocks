@@ -1,4 +1,4 @@
-// lib/providers/game_providers.dart
+// lib/providers/game_providers.dart - ゲーム開始問題修正版
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -64,16 +64,22 @@ class GameStateNotifier extends StateNotifier<GameState> {
     // 🔥 修正：初期化時のFirebaseサービス状態確認
     print('🎮 GameStateNotifier初期化');
     print('   Firebase初期化状態: ${_firebaseService.isInitialized}');
+    print('   初期ゲーム状態: ${state.status}');
+    print('   初期ピース数: ${state.pieces.length}');
 
     if (!_firebaseService.isInitialized) {
       print('⚠️ Firebase未初期化でGameStateNotifier開始');
     }
   }
 
-  /// 🔥 修正：新しいゲームを開始（Firebase未初期化対応強化）
+  /// 🔥 完全修正：新しいゲームを開始（詳細ログ・エラー処理強化）
   void startNewGame() {
     try {
       print('🎮 新しいゲーム開始処理');
+      print('   現在の状態: ${state.status}');
+      print(
+        '   設定確認: ${state.settings.difficulty.name} (${state.settings.difficulty.gridSize}×${state.settings.difficulty.gridSize})',
+      );
 
       _stopTimer();
 
@@ -95,19 +101,64 @@ class GameStateNotifier extends StateNotifier<GameState> {
         _gameTrace = null;
       }
 
-      final pieces = PuzzleGenerator.generatePuzzle(
-        gridSize: state.settings.difficulty.gridSize,
-      );
+      // 🔥 重要：パズル生成処理の詳細ログ
+      print('🧩 パズル生成開始...');
+      List<PuzzlePiece> pieces;
 
-      print('✅ パズル生成完了: ${pieces.length}ピース');
+      try {
+        pieces = PuzzleGenerator.generatePuzzle(
+          gridSize: state.settings.difficulty.gridSize,
+        );
 
-      state = GameState(
-        gameId: _uuid.v4(),
+        print('✅ パズル生成成功!');
+        print('   生成されたピース数: ${pieces.length}');
+        print(
+          '   総セル数: ${pieces.fold(0, (sum, piece) => sum + piece.cells.length)}',
+        );
+        print(
+          '   期待セル数: ${state.settings.difficulty.gridSize * state.settings.difficulty.gridSize}',
+        );
+
+        // 各ピースの詳細をログ出力
+        for (int i = 0; i < pieces.length; i++) {
+          final piece = pieces[i];
+          print(
+            '   ピース${i + 1}: ${piece.cells.length}セル, 色: ${piece.color.value.toRadixString(16)}',
+          );
+        }
+      } catch (e, stackTrace) {
+        print('❌ パズル生成エラー: $e');
+        print('スタックトレース: $stackTrace');
+
+        // 🔥 修正：フォールバック処理を強化
+        pieces = _generateEmergencyFallbackPuzzle();
+        print('🆘 緊急フォールバックパズル生成: ${pieces.length}ピース');
+      }
+
+      // 🔥 重要：新しい状態を作成
+      final newGameId = _uuid.v4();
+      final newStartTime = DateTime.now();
+
+      print('🔄 新しいゲーム状態作成中...');
+      print('   新ゲームID: $newGameId');
+      print('   開始時間: $newStartTime');
+
+      final newState = GameState(
+        gameId: newGameId,
         settings: state.settings,
         pieces: pieces,
-        status: GameStatus.playing,
-        startTime: DateTime.now(),
+        status: GameStatus.playing, // 🔥 重要：プレイ状態で開始
+        startTime: newStartTime,
       );
+
+      // 🔥 重要：状態を更新
+      state = newState;
+
+      print('✅ ゲーム状態更新完了');
+      print('   最終状態: ${state.status}');
+      print('   最終ピース数: ${state.pieces.length}');
+      print('   配置済みピース: ${state.pieces.where((p) => p.isPlaced).length}');
+      print('   未配置ピース: ${state.pieces.where((p) => !p.isPlaced).length}');
 
       // 🔥 修正：Firebase Analytics（安全版）
       try {
@@ -124,79 +175,217 @@ class GameStateNotifier extends StateNotifier<GameState> {
         print('⚠️ Firebase Analytics送信失敗（続行）: $e');
       }
 
+      // 🔥 重要：タイマー開始
       _startTimer();
       print('✅ 新しいゲーム開始完了');
+
+      // 🔥 新機能：状態検証
+      _validateGameState();
     } catch (e, stackTrace) {
       print('❌ 新しいゲーム開始エラー: $e');
       print('スタックトレース: $stackTrace');
 
       // 🔥 修正：エラー時のフォールバック処理を強化
       try {
+        print('🆘 緊急復旧処理開始...');
+
         // 最小限の状態でゲームを開始
-        final fallbackPieces = _generateFallbackPuzzle();
+        final fallbackPieces = _generateEmergencyFallbackPuzzle();
 
         state = GameState(
           gameId: _uuid.v4(),
           settings: state.settings,
           pieces: fallbackPieces,
-          status: GameStatus.playing,
+          status: GameStatus.playing, // 🔥 修正：プレイ状態で開始
           startTime: DateTime.now(),
         );
 
         _startTimer();
-        print('✅ フォールバックでゲーム開始成功');
+        print('✅ 緊急復旧でゲーム開始成功');
+        print('   復旧後ピース数: ${state.pieces.length}');
       } catch (fallbackError) {
-        print('❌ フォールバックゲーム開始も失敗: $fallbackError');
+        print('❌ 緊急復旧も失敗: $fallbackError');
 
         // 最後の手段：基本状態設定
         state = GameState(
           gameId: _uuid.v4(),
-          settings: state.settings,
+          settings: const GameSettings(
+            difficulty: GameDifficulty.easy,
+            mode: GameMode.unlimited,
+          ),
           pieces: [],
-          status: GameStatus.setup,
+          status: GameStatus.setup, // 🔥 修正：setup状態で問題を明示
           startTime: DateTime.now(),
         );
+
+        print('🆘 最小状態でゲーム初期化完了（手動でリスタートが必要）');
       }
     }
   }
 
-  /// 🔥 新機能：フォールバック用の簡単なパズル生成
-  List<PuzzlePiece> _generateFallbackPuzzle() {
+  /// 🆘 緊急フォールバックパズル生成
+  List<PuzzlePiece> _generateEmergencyFallbackPuzzle() {
     try {
-      return PuzzleGenerator.generatePuzzle(
-        gridSize: state.settings.difficulty.gridSize,
-      );
-    } catch (e) {
-      print('❌ フォールバックパズル生成エラー: $e');
+      print('🆘 緊急フォールバックパズル生成開始');
 
-      // 最小限のピースを手動生成
       final gridSize = state.settings.difficulty.gridSize;
       final pieces = <PuzzlePiece>[];
+      final colors = [
+        const Color(0xFF2E86C1),
+        const Color(0xFFE74C3C),
+        const Color(0xFF28B463),
+        const Color(0xFFF39C12),
+        const Color(0xFF8E44AD),
+      ];
 
-      // 簡単な正方形ピースを生成
-      for (int i = 0; i < (gridSize * gridSize ~/ 4); i++) {
-        pieces.add(
-          PuzzlePiece(
-            id: _uuid.v4(),
-            cells: const [
-              PiecePosition(0, 0),
-              PiecePosition(1, 0),
-              PiecePosition(0, 1),
-              PiecePosition(1, 1),
-            ],
-            color: Color(0xFF000000 + (i * 0x111111) % 0xFFFFFF),
-          ),
-        );
+      // 簡単な正方形ピースのみで構成
+      int totalCells = 0;
+      final targetCells = gridSize * gridSize;
+      int colorIndex = 0;
+
+      print('   目標セル数: $targetCells');
+
+      while (totalCells < targetCells) {
+        final remaining = targetCells - totalCells;
+
+        if (remaining >= 4) {
+          // 2×2の正方形
+          pieces.add(
+            PuzzlePiece(
+              id: _uuid.v4(),
+              cells: const [
+                PiecePosition(0, 0),
+                PiecePosition(1, 0),
+                PiecePosition(0, 1),
+                PiecePosition(1, 1),
+              ],
+              color: colors[colorIndex % colors.length],
+            ),
+          );
+          totalCells += 4;
+        } else if (remaining >= 2) {
+          // 1×2の長方形
+          pieces.add(
+            PuzzlePiece(
+              id: _uuid.v4(),
+              cells: const [PiecePosition(0, 0), PiecePosition(1, 0)],
+              color: colors[colorIndex % colors.length],
+            ),
+          );
+          totalCells += 2;
+        } else {
+          // 1×1の正方形
+          pieces.add(
+            PuzzlePiece(
+              id: _uuid.v4(),
+              cells: const [PiecePosition(0, 0)],
+              color: colors[colorIndex % colors.length],
+            ),
+          );
+          totalCells += 1;
+        }
+
+        colorIndex++;
       }
 
+      print('✅ 緊急フォールバックパズル生成完了');
+      print('   生成ピース数: ${pieces.length}');
+      print('   総セル数: $totalCells');
+
       return pieces;
+    } catch (e) {
+      print('❌ 緊急フォールバックパズル生成も失敗: $e');
+
+      // 最後の手段：単一ピース
+      return [
+        PuzzlePiece(
+          id: _uuid.v4(),
+          cells: const [PiecePosition(0, 0)],
+          color: const Color(0xFF2E86C1),
+        ),
+      ];
     }
   }
+
+  /// 🔥 新機能：ゲーム状態検証
+  void _validateGameState() {
+    try {
+      print('🔍 ゲーム状態検証開始');
+
+      final totalCells = state.pieces.fold(
+        0,
+        (sum, piece) => sum + piece.cells.length,
+      );
+      final expectedCells =
+          state.settings.difficulty.gridSize *
+          state.settings.difficulty.gridSize;
+      final placedPieces = state.pieces.where((p) => p.isPlaced).length;
+      final unplacedPieces = state.pieces.where((p) => !p.isPlaced).length;
+
+      print('   検証結果:');
+      print(
+        '   - 総セル数: $totalCells / $expectedCells (${totalCells == expectedCells ? "✅" : "❌"})',
+      );
+      print('   - 総ピース数: ${state.pieces.length}');
+      print('   - 配置済み: $placedPieces');
+      print('   - 未配置: $unplacedPieces');
+      print('   - ゲーム状態: ${state.status}');
+      print('   - タイマー状態: ${_gameTimer != null ? "動作中" : "停止"}');
+
+      if (totalCells != expectedCells) {
+        print('⚠️ セル数が一致しません！');
+      }
+
+      if (state.status != GameStatus.playing) {
+        print('⚠️ ゲーム状態がプレイ中ではありません！');
+      }
+
+      if (unplacedPieces == 0) {
+        print('⚠️ 未配置ピースがありません！');
+      }
+
+      print('✅ ゲーム状態検証完了');
+    } catch (e) {
+      print('❌ ゲーム状態検証エラー: $e');
+    }
+  }
+
+  /// 🔥 新機能：強制的にゲームを開始
+  void forceStartGame() {
+    try {
+      print('🚀 強制ゲーム開始実行');
+
+      // 現在の状態をログ
+      print('   強制開始前の状態: ${state.status}');
+      print('   現在のピース数: ${state.pieces.length}');
+
+      if (state.pieces.isEmpty) {
+        print('   ピースが空のため、新しいゲームを開始');
+        startNewGame();
+        return;
+      }
+
+      // 強制的にプレイ状態に変更
+      state = state.copyWith(
+        status: GameStatus.playing,
+        startTime: DateTime.now(),
+      );
+
+      _startTimer();
+
+      print('✅ 強制ゲーム開始完了');
+      print('   強制開始後の状態: ${state.status}');
+    } catch (e) {
+      print('❌ 強制ゲーム開始エラー: $e');
+    }
+  }
+
+  // 以降、既存のメソッドは変更なし（省略）
 
   /// ピースを配置（Firebase統合）
   void placePiece(String pieceId, PiecePosition position) {
     if (state.status != GameStatus.playing) {
-      print('⚠️ ゲーム非プレイ状態でのピース配置試行');
+      print('⚠️ ゲーム非プレイ状態でのピース配置試行: ${state.status}');
       return;
     }
 
@@ -209,7 +398,7 @@ class GameStateNotifier extends StateNotifier<GameState> {
       }).toList();
 
       state = state.copyWith(pieces: pieces, moves: state.moves + 1);
-      print('✅ ピース配置: $pieceId at $position');
+      print('✅ ピース配置: $pieceId at $position (手数: ${state.moves})');
 
       // 完了チェック
       _checkGameCompletion();
@@ -222,7 +411,7 @@ class GameStateNotifier extends StateNotifier<GameState> {
   /// ピースを回転
   void rotatePiece(String pieceId) {
     if (state.status != GameStatus.playing) {
-      print('⚠️ ゲーム非プレイ状態でのピース回転試行');
+      print('⚠️ ゲーム非プレイ状態でのピース回転試行: ${state.status}');
       return;
     }
 
@@ -235,7 +424,9 @@ class GameStateNotifier extends StateNotifier<GameState> {
       }).toList();
 
       state = state.copyWith(pieces: pieces);
-      print('✅ ピース回転: $pieceId');
+      print(
+        '✅ ピース回転: $pieceId (回転: ${pieces.firstWhere((p) => p.id == pieceId).rotation})',
+      );
     } catch (e) {
       print('❌ ピース回転エラー: $e');
       rethrow;
@@ -329,24 +520,6 @@ class GameStateNotifier extends StateNotifier<GameState> {
     }
   }
 
-  /// 🔥 新機能：デバッグ用の状態確認
-  void debugCurrentState() {
-    print('=== 現在のゲーム状態デバッグ ===');
-    print('ゲームID: ${state.gameId}');
-    print('ステータス: ${state.status}');
-    print('総ピース数: ${state.pieces.length}');
-    print('配置済みピース数: ${state.pieces.where((p) => p.isPlaced).length}');
-    print('未配置ピース数: ${state.pieces.where((p) => !p.isPlaced).length}');
-
-    for (int i = 0; i < state.pieces.length; i++) {
-      final piece = state.pieces[i];
-      print(
-        '  ピース$i: ${piece.id.substring(0, 8)} - 配置: ${piece.isPlaced} - 位置: ${piece.boardPosition}',
-      );
-    }
-    print('==========================');
-  }
-
   /// ゲーム一時停止
   void pauseGame() {
     if (state.status == GameStatus.playing) {
@@ -414,7 +587,7 @@ class GameStateNotifier extends StateNotifier<GameState> {
       } catch (e) {
         print('❌ パズル生成エラー: $e');
         // フォールバック：基本的なピース生成
-        newPieces = _generateFallbackPuzzle();
+        newPieces = _generateEmergencyFallbackPuzzle();
         print('🔄 フォールバックパズル生成: ${newPieces.length}ピース');
       }
 
@@ -475,7 +648,7 @@ class GameStateNotifier extends StateNotifier<GameState> {
       // 🔥 修正：エラー時の強力なフォールバック処理
       try {
         // 最低限の状態でゲームを継続
-        final fallbackPieces = _generateFallbackPuzzle();
+        final fallbackPieces = _generateEmergencyFallbackPuzzle();
 
         state = GameState(
           gameId: _uuid.v4(),

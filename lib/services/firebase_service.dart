@@ -1,4 +1,4 @@
-// lib/services/firebase_service.dart - 安全性強化版
+// lib/services/firebase_service.dart - 初期化エラー解決版
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_analytics/firebase_analytics.dart';
 import 'package:firebase_crashlytics/firebase_crashlytics.dart';
@@ -21,6 +21,7 @@ class FirebaseService {
   FirebasePerformance? _performance;
 
   bool _isInitialized = false;
+  bool _initializationFailed = false;
 
   // safe getters - 初期化されていない場合はnullを返す
   FirebaseAnalytics? get analytics => _analytics;
@@ -29,22 +30,66 @@ class FirebaseService {
   FirebasePerformance? get performance => _performance;
 
   bool get isInitialized => _isInitialized;
+  bool get initializationFailed => _initializationFailed;
 
-  /// 🔥 修正：Firebase初期化（安全性強化）
+  /// 🔥 完全修正：Firebase初期化（エラー回復機能付き）
   Future<void> initialize() async {
     if (_isInitialized) {
       print('✅ Firebase既に初期化済み');
       return;
     }
 
+    if (_initializationFailed) {
+      print('⚠️ Firebase初期化は既に失敗済み（フォールバックモード）');
+      return;
+    }
+
     try {
       print('🔥 Firebase初期化開始');
 
+      // 🔥 修正：Firebaseの初期化状態を確認
+      bool firebaseAlreadyInitialized = false;
+      try {
+        // Firebase.appsでアプリが既に初期化されているかチェック
+        final apps = Firebase.apps;
+        firebaseAlreadyInitialized = apps.isNotEmpty;
+        print('   Firebase Apps: ${apps.length}個検出');
+      } catch (e) {
+        print('   Firebase Apps確認エラー: $e');
+      }
+
       // Firebase Core初期化
-      await Firebase.initializeApp(
-        options: DefaultFirebaseOptions.currentPlatform,
-      );
-      print('✅ Firebase Core初期化完了');
+      if (!firebaseAlreadyInitialized) {
+        try {
+          await Firebase.initializeApp(
+            options: DefaultFirebaseOptions.currentPlatform,
+          );
+          print('✅ Firebase Core初期化完了');
+        } catch (e) {
+          print('❌ Firebase Core初期化エラー: $e');
+
+          // 🔥 修正：特定のエラーの場合は再試行
+          if (e.toString().contains('channel-error') ||
+              e.toString().contains('Unable to establish connection')) {
+            print('🔄 接続エラーを検出、再試行します...');
+            await Future.delayed(const Duration(seconds: 2));
+
+            try {
+              await Firebase.initializeApp(
+                options: DefaultFirebaseOptions.currentPlatform,
+              );
+              print('✅ Firebase Core初期化完了（再試行）');
+            } catch (retryError) {
+              print('❌ Firebase Core再試行も失敗: $retryError');
+              throw retryError;
+            }
+          } else {
+            throw e;
+          }
+        }
+      } else {
+        print('✅ Firebase Core既に初期化済み');
+      }
 
       // 各サービス初期化（個別のtry-catch）
       await _initializeAnalytics();
@@ -58,12 +103,21 @@ class FirebaseService {
       print('❌ Firebase初期化エラー: $e');
       print('スタックトレース: $stackTrace');
 
+      // 🔥 修正：初期化失敗フラグを設定
+      _initializationFailed = true;
+
       // 初期化失敗時はnullオブジェクトを設定
       _initializeFallbackServices();
 
       // 🔥 重要：Firebase初期化失敗はアプリクラッシュさせない
-      // _isInitializedはfalseのままにして、後続処理で安全に動作させる
       print('⚠️ Firebase初期化失敗 - フォールバックモードで継続');
+
+      // エラーレポートを試行（他のサービスが動作する場合）
+      try {
+        ErrorHandler.reportError('Firebase初期化失敗', e, stackTrace);
+      } catch (reportError) {
+        print('❌ エラーレポート送信も失敗: $reportError');
+      }
     }
   }
 
@@ -79,7 +133,7 @@ class FirebaseService {
     print('⚠️ Firebase初期化失敗 - フォールバックモードで動作');
   }
 
-  /// Analytics初期化
+  /// Analytics初期化（エラーハンドリング強化）
   Future<void> _initializeAnalytics() async {
     try {
       _analytics = FirebaseAnalytics.instance;
@@ -97,7 +151,7 @@ class FirebaseService {
     }
   }
 
-  /// Crashlytics初期化
+  /// Crashlytics初期化（エラーハンドリング強化）
   Future<void> _initializeCrashlytics() async {
     try {
       _crashlytics = FirebaseCrashlytics.instance;
@@ -125,7 +179,7 @@ class FirebaseService {
     }
   }
 
-  /// Remote Config初期化
+  /// Remote Config初期化（エラーハンドリング強化）
   Future<void> _initializeRemoteConfig() async {
     try {
       _remoteConfig = FirebaseRemoteConfig.instance;
@@ -156,7 +210,7 @@ class FirebaseService {
         ),
       );
 
-      // 初回fetch
+      // 初回fetch（エラーハンドリング強化）
       try {
         await _remoteConfig!.fetchAndActivate();
         print('✅ Remote Config値取得完了');
@@ -164,7 +218,8 @@ class FirebaseService {
           _logRemoteConfigValues();
         }
       } catch (e) {
-        print('❌ Remote Config取得エラー: $e');
+        print('❌ Remote Config取得エラー（デフォルト値使用）: $e');
+        // デフォルト値で継続
       }
 
       print('✅ Firebase Remote Config初期化完了');
@@ -174,7 +229,7 @@ class FirebaseService {
     }
   }
 
-  /// Performance Monitoring初期化
+  /// Performance Monitoring初期化（エラーハンドリング強化）
   Future<void> _initializePerformance() async {
     try {
       _performance = FirebasePerformance.instance;
@@ -195,7 +250,9 @@ class FirebaseService {
     Map<String, Object>? parameters,
   }) async {
     if (!_isInitialized || _analytics == null) {
-      print('⚠️ Analytics未初期化 - イベント送信スキップ: $name');
+      if (kDebugMode) {
+        print('⚠️ Analytics未初期化 - イベント送信スキップ: $name');
+      }
       return;
     }
 
@@ -266,7 +323,9 @@ class FirebaseService {
     bool fatal = false,
   }) async {
     if (!_isInitialized || _crashlytics == null) {
-      print('⚠️ Crashlytics未初期化 - エラー報告スキップ: $message');
+      if (kDebugMode) {
+        print('⚠️ Crashlytics未初期化 - エラー報告スキップ: $message');
+      }
       return;
     }
 
@@ -301,7 +360,9 @@ class FirebaseService {
   /// 🔥 修正：パフォーマンストレース開始（完全安全版）
   Trace? startTrace(String name) {
     if (!_isInitialized || _performance == null) {
-      print('⚠️ Performance未初期化 - トレース開始スキップ: $name');
+      if (kDebugMode) {
+        print('⚠️ Performance未初期化 - トレース開始スキップ: $name');
+      }
       return null;
     }
 
@@ -434,6 +495,36 @@ class FirebaseService {
       getBoolConfig('feature_online_ranking_enabled');
   int get maxHintsPerGame => getIntConfig('max_hints_per_game');
   int get adInterstitialFrequency => getIntConfig('ad_interstitial_frequency');
+
+  /// 🔥 新機能：Firebase状態確認
+  void checkFirebaseStatus() {
+    print('=== Firebase Service Status ===');
+    print('初期化状態: $_isInitialized');
+    print('初期化失敗: $_initializationFailed');
+    print('Analytics: ${_analytics != null ? "有効" : "無効"}');
+    print('Crashlytics: ${_crashlytics != null ? "有効" : "無効"}');
+    print('Remote Config: ${_remoteConfig != null ? "有効" : "無効"}');
+    print('Performance: ${_performance != null ? "有効" : "無効"}');
+    print('============================');
+  }
+
+  /// 🔥 新機能：Firebase再初期化（エラー時の復旧用）
+  Future<void> reinitialize() async {
+    print('🔄 Firebase再初期化開始');
+
+    // 状態をリセット
+    _isInitialized = false;
+    _initializationFailed = false;
+    _analytics = null;
+    _crashlytics = null;
+    _remoteConfig = null;
+    _performance = null;
+
+    // 再初期化実行
+    await initialize();
+
+    print('✅ Firebase再初期化完了');
+  }
 }
 
 // Firebaseサービスプロバイダー

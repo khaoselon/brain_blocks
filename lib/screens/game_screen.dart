@@ -1,4 +1,4 @@
-// lib/screens/game_screen.dart - 不具合修正版
+// lib/screens/game_screen.dart - ゲーム開始問題修正版
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -30,6 +30,9 @@ class _GameScreenState extends ConsumerState<GameScreen>
   bool _isProcessingAd = false;
   // 🔥 修正：ダイアログ表示中フラグ
   bool _isDialogShowing = false;
+  // 🔥 新機能：ゲーム初期化状態管理
+  bool _isGameInitialized = false;
+  bool _isInitializing = false;
 
   @override
   void initState() {
@@ -39,16 +42,113 @@ class _GameScreenState extends ConsumerState<GameScreen>
       vsync: this,
     );
 
-    // ゲーム開始
+    // 🔥 修正：より確実なゲーム開始処理
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      try {
-        ref.read(gameStateProvider.notifier).startNewGame();
-        print('✅ 新しいゲーム開始');
-      } catch (e) {
-        print('❌ ゲーム開始エラー: $e');
-        _showErrorMessage('ゲーム開始に失敗しました');
-      }
+      _initializeGame();
     });
+  }
+
+  /// 🔥 新機能：ゲーム初期化処理
+  Future<void> _initializeGame() async {
+    if (_isInitializing) {
+      print('⚠️ 既にゲーム初期化中です');
+      return;
+    }
+
+    setState(() {
+      _isInitializing = true;
+    });
+
+    try {
+      print('🎮 ゲーム画面初期化開始');
+
+      // プロバイダーの状態を確認
+      final gameState = ref.read(gameStateProvider);
+      print('   現在のゲーム状態: ${gameState.status}');
+      print('   現在のピース数: ${gameState.pieces.length}');
+
+      // 設定を確認
+      final gameSettings = ref.read(gameSettingsProvider);
+      print(
+        '   ゲーム設定: ${gameSettings.difficulty.name} (${gameSettings.difficulty.gridSize}×${gameSettings.difficulty.gridSize})',
+      );
+
+      // 🔥 重要：ゲーム状態に応じて適切に初期化
+      if (gameState.status == GameStatus.setup || gameState.pieces.isEmpty) {
+        print('🚀 新しいゲームを開始');
+        ref.read(gameStateProvider.notifier).startNewGame();
+      } else if (gameState.status == GameStatus.paused) {
+        print('⏸️ 一時停止状態から再開');
+        ref.read(gameStateProvider.notifier).resumeGame();
+      } else if (gameState.status == GameStatus.playing) {
+        print('✅ 既にゲームが進行中');
+      } else {
+        print('🔄 不明な状態からゲームを強制開始');
+        ref.read(gameStateProvider.notifier).forceStartGame();
+      }
+
+      // 初期化完了まで少し待機
+      await Future.delayed(const Duration(milliseconds: 500));
+
+      // 初期化後の状態を確認
+      final finalState = ref.read(gameStateProvider);
+      print('   初期化後の状態: ${finalState.status}');
+      print('   初期化後のピース数: ${finalState.pieces.length}');
+      print(
+        '   未配置ピース数: ${finalState.pieces.where((p) => !p.isPlaced).length}',
+      );
+
+      if (finalState.pieces.isNotEmpty &&
+          finalState.status == GameStatus.playing) {
+        setState(() {
+          _isGameInitialized = true;
+        });
+        print('✅ ゲーム初期化成功');
+        _showMessage('ゲームを開始しました！', Colors.green);
+      } else {
+        print('❌ ゲーム初期化失敗、再試行します');
+        await _retryGameInitialization();
+      }
+    } catch (e, stackTrace) {
+      print('❌ ゲーム初期化エラー: $e');
+      print('スタックトレース: $stackTrace');
+      await _retryGameInitialization();
+    } finally {
+      setState(() {
+        _isInitializing = false;
+      });
+    }
+  }
+
+  /// 🔥 新機能：ゲーム初期化の再試行
+  Future<void> _retryGameInitialization() async {
+    print('🔄 ゲーム初期化を再試行');
+
+    try {
+      // 強制的に新しいゲームを開始
+      ref.read(gameStateProvider.notifier).startNewGame();
+
+      // 少し待機
+      await Future.delayed(const Duration(milliseconds: 1000));
+
+      final retryState = ref.read(gameStateProvider);
+      print('   再試行後の状態: ${retryState.status}');
+      print('   再試行後のピース数: ${retryState.pieces.length}');
+
+      if (retryState.pieces.isNotEmpty) {
+        setState(() {
+          _isGameInitialized = true;
+        });
+        print('✅ ゲーム初期化再試行成功');
+        _showMessage('ゲームを再開しました', Colors.blue);
+      } else {
+        print('❌ ゲーム初期化再試行も失敗');
+        _showErrorMessage('ゲーム開始に失敗しました。リセットしてください。');
+      }
+    } catch (e) {
+      print('❌ ゲーム初期化再試行エラー: $e');
+      _showErrorMessage('ゲーム初期化に失敗しました');
+    }
   }
 
   @override
@@ -65,6 +165,13 @@ class _GameScreenState extends ConsumerState<GameScreen>
     ref.listen<GameState>(gameStateProvider, (previous, current) {
       if (previous?.status != current.status) {
         _handleGameStatusChange(previous, current);
+      }
+
+      // 🔥 新機能：ピース数の変化を監視
+      if (previous != null && previous.pieces.length != current.pieces.length) {
+        print(
+          '📊 ピース数変化: ${previous.pieces.length} → ${current.pieces.length}',
+        );
       }
     });
 
@@ -85,20 +192,183 @@ class _GameScreenState extends ConsumerState<GameScreen>
         ],
       ),
       body: SafeArea(
-        child: LayoutBuilder(
-          builder: (context, constraints) {
-            final isLandscape = constraints.maxWidth > constraints.maxHeight;
-            final screenWidth = constraints.maxWidth;
+        child: _isInitializing
+            ? _buildLoadingScreen() // 🔥 新機能：ローディング画面
+            : !_isGameInitialized
+            ? _buildErrorScreen() // 🔥 新機能：エラー画面
+            : LayoutBuilder(
+                builder: (context, constraints) {
+                  final isLandscape =
+                      constraints.maxWidth > constraints.maxHeight;
+                  final screenWidth = constraints.maxWidth;
 
-            if (isLandscape && screenWidth > 800) {
-              return _buildLandscapeLayout(gameState, constraints);
-            } else {
-              return _buildPortraitLayout(gameState, constraints);
-            }
-          },
+                  if (isLandscape && screenWidth > 800) {
+                    return _buildLandscapeLayout(gameState, constraints);
+                  } else {
+                    return _buildPortraitLayout(gameState, constraints);
+                  }
+                },
+              ),
+      ),
+    );
+  }
+
+  /// 🔥 新機能：ローディング画面
+  Widget _buildLoadingScreen() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const CircularProgressIndicator(
+            valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF2E86C1)),
+          ),
+          const SizedBox(height: 24),
+          const Text(
+            'ゲームを準備中...',
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.w500,
+              color: Color(0xFF2E86C1),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'パズルピースを生成しています',
+            style: TextStyle(fontSize: 14, color: Colors.grey[600]),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 🔥 新機能：エラー画面
+  Widget _buildErrorScreen() {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(Icons.error_outline, size: 64, color: Colors.red),
+            const SizedBox(height: 24),
+            const Text(
+              'ゲーム開始に失敗しました',
+              style: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.bold,
+                color: Colors.red,
+              ),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'パズルの生成でエラーが発生しました。\n以下のボタンから再試行してください。',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 16, color: Colors.grey[600]),
+            ),
+            const SizedBox(height: 32),
+
+            // 再試行ボタン
+            SizedBox(
+              width: double.infinity,
+              height: 48,
+              child: ElevatedButton.icon(
+                onPressed: _isInitializing
+                    ? null
+                    : () {
+                        setState(() {
+                          _isGameInitialized = false;
+                        });
+                        _initializeGame();
+                      },
+                icon: const Icon(Icons.refresh),
+                label: const Text('再試行'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF2E86C1),
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+              ),
+            ),
+
+            const SizedBox(height: 16),
+
+            // 強制リセットボタン
+            SizedBox(
+              width: double.infinity,
+              height: 48,
+              child: OutlinedButton.icon(
+                onPressed: _isInitializing
+                    ? null
+                    : () {
+                        _forceResetGame();
+                      },
+                icon: const Icon(Icons.restart_alt),
+                label: const Text('強制リセット'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: Colors.orange,
+                  side: const BorderSide(color: Colors.orange),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+              ),
+            ),
+
+            const SizedBox(height: 16),
+
+            // メニューに戻るボタン
+            TextButton.icon(
+              onPressed: () => Navigator.of(context).pop(),
+              icon: const Icon(Icons.home),
+              label: const Text('メニューに戻る'),
+              style: TextButton.styleFrom(foregroundColor: Colors.grey[600]),
+            ),
+          ],
         ),
       ),
     );
+  }
+
+  /// 🔥 新機能：強制リセット
+  void _forceResetGame() async {
+    try {
+      print('🔧 強制リセット実行');
+
+      setState(() {
+        _isInitializing = true;
+        _isGameInitialized = false;
+      });
+
+      // 確実にリセット
+      ref.read(gameStateProvider.notifier).resetGame();
+
+      // 少し待機
+      await Future.delayed(const Duration(milliseconds: 1000));
+
+      // 状態確認
+      final resetState = ref.read(gameStateProvider);
+      print('   リセット後の状態: ${resetState.status}');
+      print('   リセット後のピース数: ${resetState.pieces.length}');
+
+      if (resetState.pieces.isNotEmpty &&
+          resetState.status == GameStatus.playing) {
+        setState(() {
+          _isGameInitialized = true;
+        });
+        _showMessage('ゲームを強制リセットしました', Colors.green);
+      } else {
+        _showErrorMessage('強制リセットに失敗しました');
+      }
+    } catch (e) {
+      print('❌ 強制リセットエラー: $e');
+      _showErrorMessage('強制リセットでエラーが発生しました');
+    } finally {
+      setState(() {
+        _isInitializing = false;
+      });
+    }
   }
 
   /// 縦並びレイアウト

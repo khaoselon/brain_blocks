@@ -1,4 +1,4 @@
-// lib/services/firebase_service.dart
+// lib/services/firebase_service.dart - 安全性強化版
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_analytics/firebase_analytics.dart';
 import 'package:firebase_crashlytics/firebase_crashlytics.dart';
@@ -30,37 +30,40 @@ class FirebaseService {
 
   bool get isInitialized => _isInitialized;
 
-  /// Firebase初期化
+  /// 🔥 修正：Firebase初期化（安全性強化）
   Future<void> initialize() async {
-    if (_isInitialized) return;
+    if (_isInitialized) {
+      print('✅ Firebase既に初期化済み');
+      return;
+    }
 
     try {
+      print('🔥 Firebase初期化開始');
+
       // Firebase Core初期化
       await Firebase.initializeApp(
         options: DefaultFirebaseOptions.currentPlatform,
       );
+      print('✅ Firebase Core初期化完了');
 
-      // 各サービス初期化
+      // 各サービス初期化（個別のtry-catch）
       await _initializeAnalytics();
       await _initializeCrashlytics();
       await _initializeRemoteConfig();
       await _initializePerformance();
 
       _isInitialized = true;
-
-      if (kDebugMode) {
-        print('✅ Firebase初期化完了');
-      }
-    } catch (e) {
-      if (kDebugMode) {
-        print('❌ Firebase初期化エラー: $e');
-      }
+      print('✅ Firebase初期化完了');
+    } catch (e, stackTrace) {
+      print('❌ Firebase初期化エラー: $e');
+      print('スタックトレース: $stackTrace');
 
       // 初期化失敗時はnullオブジェクトを設定
       _initializeFallbackServices();
 
-      // Firebase初期化失敗はアプリクラッシュさせない
-      ErrorHandler.reportError('Firebase初期化失敗', e);
+      // 🔥 重要：Firebase初期化失敗はアプリクラッシュさせない
+      // _isInitializedはfalseのままにして、後続処理で安全に動作させる
+      print('⚠️ Firebase初期化失敗 - フォールバックモードで継続');
     }
   }
 
@@ -71,10 +74,9 @@ class FirebaseService {
     _crashlytics = null;
     _remoteConfig = null;
     _performance = null;
+    _isInitialized = false; // 🔥 修正：falseのまま
 
-    if (kDebugMode) {
-      print('⚠️ Firebase初期化失敗 - フォールバックモードで動作');
-    }
+    print('⚠️ Firebase初期化失敗 - フォールバックモードで動作');
   }
 
   /// Analytics初期化
@@ -88,13 +90,9 @@ class FirebaseService {
       // ユーザープロパティ設定
       await _analytics!.setUserProperty(name: 'app_version', value: '1.0.0');
 
-      if (kDebugMode) {
-        print('Firebase Analytics初期化完了');
-      }
+      print('✅ Firebase Analytics初期化完了');
     } catch (e) {
-      if (kDebugMode) {
-        print('❌ Firebase Analytics初期化エラー: $e');
-      }
+      print('❌ Firebase Analytics初期化エラー: $e');
       _analytics = null;
     }
   }
@@ -120,13 +118,9 @@ class FirebaseService {
         };
       }
 
-      if (kDebugMode) {
-        print('Firebase Crashlytics初期化完了');
-      }
+      print('✅ Firebase Crashlytics初期化完了');
     } catch (e) {
-      if (kDebugMode) {
-        print('❌ Firebase Crashlytics初期化エラー: $e');
-      }
+      print('❌ Firebase Crashlytics初期化エラー: $e');
       _crashlytics = null;
     }
   }
@@ -165,23 +159,17 @@ class FirebaseService {
       // 初回fetch
       try {
         await _remoteConfig!.fetchAndActivate();
+        print('✅ Remote Config値取得完了');
         if (kDebugMode) {
-          print('Remote Config値取得完了');
           _logRemoteConfigValues();
         }
       } catch (e) {
-        if (kDebugMode) {
-          print('Remote Config取得エラー: $e');
-        }
+        print('❌ Remote Config取得エラー: $e');
       }
 
-      if (kDebugMode) {
-        print('Firebase Remote Config初期化完了');
-      }
+      print('✅ Firebase Remote Config初期化完了');
     } catch (e) {
-      if (kDebugMode) {
-        print('❌ Firebase Remote Config初期化エラー: $e');
-      }
+      print('❌ Firebase Remote Config初期化エラー: $e');
       _remoteConfig = null;
     }
   }
@@ -194,35 +182,28 @@ class FirebaseService {
       // データ収集設定
       await _performance!.setPerformanceCollectionEnabled(!kDebugMode);
 
-      if (kDebugMode) {
-        print('Firebase Performance初期化完了');
-      }
+      print('✅ Firebase Performance初期化完了');
     } catch (e) {
-      if (kDebugMode) {
-        print('❌ Firebase Performance初期化エラー: $e');
-      }
+      print('❌ Firebase Performance初期化エラー: $e');
       _performance = null;
     }
   }
 
-  /// アナリティクスイベント送信（安全版）
+  /// 🔥 修正：アナリティクスイベント送信（完全安全版）
   Future<void> logEvent({
     required String name,
     Map<String, Object>? parameters,
   }) async {
-    if (_analytics == null) {
-      if (kDebugMode) {
-        print('⚠️ Analytics未初期化 - イベント送信スキップ: $name');
-      }
+    if (!_isInitialized || _analytics == null) {
+      print('⚠️ Analytics未初期化 - イベント送信スキップ: $name');
       return;
     }
 
     try {
       await _analytics!.logEvent(name: name, parameters: parameters);
+      if (kDebugMode) print('✅ Analytics event送信: $name');
     } catch (e) {
-      if (kDebugMode) {
-        print('Analytics event送信エラー: $e');
-      }
+      print('❌ Analytics event送信エラー: $e');
     }
   }
 
@@ -277,17 +258,15 @@ class FirebaseService {
     );
   }
 
-  /// カスタムクラッシュレポート（安全版）
+  /// 🔥 修正：カスタムクラッシュレポート（完全安全版）
   Future<void> reportError({
     required String message,
     Object? error,
     StackTrace? stackTrace,
     bool fatal = false,
   }) async {
-    if (_crashlytics == null) {
-      if (kDebugMode) {
-        print('⚠️ Crashlytics未初期化 - エラー報告スキップ: $message');
-      }
+    if (!_isInitialized || _crashlytics == null) {
+      print('⚠️ Crashlytics未初期化 - エラー報告スキップ: $message');
       return;
     }
 
@@ -298,46 +277,80 @@ class FirebaseService {
         fatal: fatal,
         information: [message],
       );
+      if (kDebugMode) print('✅ Crashlytics報告: $message');
     } catch (e) {
-      if (kDebugMode) {
-        print('Crashlytics報告エラー: $e');
-      }
+      print('❌ Crashlytics報告エラー: $e');
     }
   }
 
-  /// ユーザー情報設定（安全版）
+  /// 🔥 修正：ユーザー情報設定（完全安全版）
   Future<void> setUserId(String userId) async {
     try {
-      await _analytics?.setUserId(id: userId);
-      await _crashlytics?.setUserIdentifier(userId);
-    } catch (e) {
-      if (kDebugMode) {
-        print('ユーザーID設定エラー: $e');
+      if (_analytics != null) {
+        await _analytics!.setUserId(id: userId);
       }
+      if (_crashlytics != null) {
+        await _crashlytics!.setUserIdentifier(userId);
+      }
+      if (kDebugMode) print('✅ ユーザーID設定: $userId');
+    } catch (e) {
+      print('❌ ユーザーID設定エラー: $e');
+    }
+  }
+
+  /// 🔥 修正：パフォーマンストレース開始（完全安全版）
+  Trace? startTrace(String name) {
+    if (!_isInitialized || _performance == null) {
+      print('⚠️ Performance未初期化 - トレース開始スキップ: $name');
+      return null;
+    }
+
+    try {
+      final trace = _performance!.newTrace(name);
+      if (kDebugMode) print('✅ パフォーマンストレース開始: $name');
+      return trace;
+    } catch (e) {
+      print('❌ パフォーマンストレース開始エラー: $e');
+      return null;
     }
   }
 
   /// Remote Config値取得ヘルパー（安全版）
   bool getBoolConfig(String key) {
-    if (_remoteConfig == null) {
+    if (!_isInitialized || _remoteConfig == null) {
       // デフォルト値を返す
       return _getDefaultBoolValue(key);
     }
-    return _remoteConfig!.getBool(key);
+    try {
+      return _remoteConfig!.getBool(key);
+    } catch (e) {
+      print('❌ RemoteConfig bool取得エラー: $e');
+      return _getDefaultBoolValue(key);
+    }
   }
 
   int getIntConfig(String key) {
-    if (_remoteConfig == null) {
+    if (!_isInitialized || _remoteConfig == null) {
       return _getDefaultIntValue(key);
     }
-    return _remoteConfig!.getInt(key);
+    try {
+      return _remoteConfig!.getInt(key);
+    } catch (e) {
+      print('❌ RemoteConfig int取得エラー: $e');
+      return _getDefaultIntValue(key);
+    }
   }
 
   String getStringConfig(String key) {
-    if (_remoteConfig == null) {
+    if (!_isInitialized || _remoteConfig == null) {
       return _getDefaultStringValue(key);
     }
-    return _remoteConfig!.getString(key);
+    try {
+      return _remoteConfig!.getString(key);
+    } catch (e) {
+      print('❌ RemoteConfig string取得エラー: $e');
+      return _getDefaultStringValue(key);
+    }
   }
 
   /// デフォルト値設定
@@ -381,20 +394,9 @@ class FirebaseService {
     }
   }
 
-  /// パフォーマンストレース開始（安全版）
-  Trace? startTrace(String name) {
-    if (_performance == null) {
-      if (kDebugMode) {
-        print('⚠️ Performance未初期化 - トレース開始スキップ: $name');
-      }
-      return null;
-    }
-    return _performance!.newTrace(name);
-  }
-
   /// デバッグ用：Remote Config値出力
   void _logRemoteConfigValues() {
-    if (!kDebugMode || _remoteConfig == null) return;
+    if (!kDebugMode || !_isInitialized || _remoteConfig == null) return;
 
     final keys = [
       'feature_daily_challenge_enabled',
@@ -407,8 +409,12 @@ class FirebaseService {
 
     print('=== Remote Config Values ===');
     for (final key in keys) {
-      final value = _remoteConfig!.getValue(key);
-      print('$key: ${value.asString()}');
+      try {
+        final value = _remoteConfig!.getValue(key);
+        print('$key: ${value.asString()}');
+      } catch (e) {
+        print('$key: エラー($e)');
+      }
     }
     print('===========================');
   }

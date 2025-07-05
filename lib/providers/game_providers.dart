@@ -1,5 +1,6 @@
 // lib/providers/game_providers.dart
 import 'dart:async';
+import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:firebase_performance/firebase_performance.dart';
 import 'package:uuid/uuid.dart';
@@ -59,19 +60,40 @@ class GameStateNotifier extends StateNotifier<GameState> {
   Trace? _gameTrace; // パフォーマンス計測
 
   GameStateNotifier(GameSettings settings, this._firebaseService)
-    : super(GameState(gameId: _uuid.v4(), settings: settings, pieces: []));
+    : super(GameState(gameId: _uuid.v4(), settings: settings, pieces: [])) {
+    // 🔥 修正：初期化時のFirebaseサービス状態確認
+    print('🎮 GameStateNotifier初期化');
+    print('   Firebase初期化状態: ${_firebaseService.isInitialized}');
 
-  /// 🔥 修正：新しいゲームを開始（エラーハンドリング強化）
+    if (!_firebaseService.isInitialized) {
+      print('⚠️ Firebase未初期化でGameStateNotifier開始');
+    }
+  }
+
+  /// 🔥 修正：新しいゲームを開始（Firebase未初期化対応強化）
   void startNewGame() {
     try {
       print('🎮 新しいゲーム開始処理');
 
       _stopTimer();
 
-      // パフォーマンストレース開始
-      _gameTrace?.stop(); // 既存のトレースを停止
-      _gameTrace = _firebaseService.startTrace('game_session');
-      _gameTrace?.start();
+      // 🔥 修正：Firebase未初期化でも動作するように修正
+      Trace? gameTrace;
+      try {
+        if (_firebaseService.isInitialized &&
+            _firebaseService.performance != null) {
+          gameTrace = _firebaseService.startTrace('game_session');
+          gameTrace?.start();
+          _gameTrace = gameTrace;
+          print('✅ Firebase Trace開始');
+        } else {
+          print('⚠️ Firebase未初期化 - Traceスキップ');
+          _gameTrace = null;
+        }
+      } catch (e) {
+        print('⚠️ Firebase Trace開始エラー（続行）: $e');
+        _gameTrace = null;
+      }
 
       final pieces = PuzzleGenerator.generatePuzzle(
         gridSize: state.settings.difficulty.gridSize,
@@ -87,14 +109,19 @@ class GameStateNotifier extends StateNotifier<GameState> {
         startTime: DateTime.now(),
       );
 
-      // Firebase Analytics: ゲーム開始
+      // 🔥 修正：Firebase Analytics（安全版）
       try {
-        _firebaseService.logGameStart(
-          difficulty: state.settings.difficulty.name,
-          gameMode: state.settings.mode.name,
-        );
+        if (_firebaseService.isInitialized) {
+          _firebaseService.logGameStart(
+            difficulty: state.settings.difficulty.name,
+            gameMode: state.settings.mode.name,
+          );
+          print('✅ Firebase Analytics送信成功');
+        } else {
+          print('⚠️ Firebase未初期化 - Analytics スキップ');
+        }
       } catch (e) {
-        print('⚠️ Firebase Analytics ログ送信失敗: $e');
+        print('⚠️ Firebase Analytics送信失敗（続行）: $e');
       }
 
       _startTimer();
@@ -103,16 +130,66 @@ class GameStateNotifier extends StateNotifier<GameState> {
       print('❌ 新しいゲーム開始エラー: $e');
       print('スタックトレース: $stackTrace');
 
-      // エラー時はフォールバック状態を設定
-      state = GameState(
-        gameId: _uuid.v4(),
-        settings: state.settings,
-        pieces: [],
-        status: GameStatus.setup,
-        startTime: DateTime.now(),
-      );
+      // 🔥 修正：エラー時のフォールバック処理を強化
+      try {
+        // 最小限の状態でゲームを開始
+        final fallbackPieces = _generateFallbackPuzzle();
 
-      rethrow;
+        state = GameState(
+          gameId: _uuid.v4(),
+          settings: state.settings,
+          pieces: fallbackPieces,
+          status: GameStatus.playing,
+          startTime: DateTime.now(),
+        );
+
+        _startTimer();
+        print('✅ フォールバックでゲーム開始成功');
+      } catch (fallbackError) {
+        print('❌ フォールバックゲーム開始も失敗: $fallbackError');
+
+        // 最後の手段：基本状態設定
+        state = GameState(
+          gameId: _uuid.v4(),
+          settings: state.settings,
+          pieces: [],
+          status: GameStatus.setup,
+          startTime: DateTime.now(),
+        );
+      }
+    }
+  }
+
+  /// 🔥 新機能：フォールバック用の簡単なパズル生成
+  List<PuzzlePiece> _generateFallbackPuzzle() {
+    try {
+      return PuzzleGenerator.generatePuzzle(
+        gridSize: state.settings.difficulty.gridSize,
+      );
+    } catch (e) {
+      print('❌ フォールバックパズル生成エラー: $e');
+
+      // 最小限のピースを手動生成
+      final gridSize = state.settings.difficulty.gridSize;
+      final pieces = <PuzzlePiece>[];
+
+      // 簡単な正方形ピースを生成
+      for (int i = 0; i < (gridSize * gridSize ~/ 4); i++) {
+        pieces.add(
+          PuzzlePiece(
+            id: _uuid.v4(),
+            cells: const [
+              PiecePosition(0, 0),
+              PiecePosition(1, 0),
+              PiecePosition(0, 1),
+              PiecePosition(1, 1),
+            ],
+            color: Color(0xFF000000 + (i * 0x111111) % 0xFFFFFF),
+          ),
+        );
+      }
+
+      return pieces;
     }
   }
 
@@ -304,19 +381,28 @@ class GameStateNotifier extends StateNotifier<GameState> {
     }
   }
 
-  /// 🔥 完全修正：ゲームリセット（完全に新しいパズル生成）
+  /// 🔥 完全修正：ゲームリセット（Firebase未初期化対応）
   void resetGame() {
     try {
       print('🔄 ゲームリセット開始');
       print('   現在の状態: ${state.status}');
       print('   現在のピース数: ${state.pieces.length}');
+      print('   Firebase初期化状態: ${_firebaseService.isInitialized}');
 
       // 現在のタイマーを停止
       _stopTimer();
 
-      // 現在のトレース終了
-      _gameTrace?.putAttribute('reset', 'true');
-      _gameTrace?.stop();
+      // 🔥 修正：Firebase関連処理（安全版）
+      try {
+        if (_gameTrace != null && _firebaseService.isInitialized) {
+          _gameTrace!.putAttribute('reset', 'true');
+          _gameTrace!.stop();
+          print('✅ Firebase Trace終了');
+        }
+      } catch (e) {
+        print('⚠️ Firebase Trace終了エラー（続行）: $e');
+      }
+      _gameTrace = null;
 
       // 🔥 重要：完全に新しいパズルを生成
       List<PuzzlePiece> newPieces;
@@ -327,8 +413,9 @@ class GameStateNotifier extends StateNotifier<GameState> {
         print('✅ 新しいパズル生成完了: ${newPieces.length}ピース');
       } catch (e) {
         print('❌ パズル生成エラー: $e');
-        // フォールバック：空のピースリスト
-        newPieces = [];
+        // フォールバック：基本的なピース生成
+        newPieces = _generateFallbackPuzzle();
+        print('🔄 フォールバックパズル生成: ${newPieces.length}ピース');
       }
 
       // 🔥 修正：完全に新しい状態を作成（すべてをリセット）
@@ -343,25 +430,38 @@ class GameStateNotifier extends StateNotifier<GameState> {
         startTime: DateTime.now(), // 新しい開始時間
       );
 
-      // 新しいパフォーマンストレース開始
-      _gameTrace = _firebaseService.startTrace('game_session_reset');
-      _gameTrace?.start();
+      // 🔥 修正：新しいパフォーマンストレース開始（安全版）
+      try {
+        if (_firebaseService.isInitialized &&
+            _firebaseService.performance != null) {
+          _gameTrace = _firebaseService.startTrace('game_session_reset');
+          _gameTrace?.start();
+          print('✅ 新しいFirebase Trace開始');
+        }
+      } catch (e) {
+        print('⚠️ 新Firebase Trace開始エラー（続行）: $e');
+      }
 
       // 🔥 重要：タイマーを再開
       _startTimer();
 
-      // Firebase Analytics: リセットイベント
+      // 🔥 修正：Firebase Analytics（安全版）
       try {
-        _firebaseService.logEvent(
-          name: 'game_reset',
-          parameters: {
-            'difficulty': state.settings.difficulty.name,
-            'game_mode': state.settings.mode.name,
-            'pieces_count': newPieces.length,
-          },
-        );
+        if (_firebaseService.isInitialized) {
+          _firebaseService.logEvent(
+            name: 'game_reset',
+            parameters: {
+              'difficulty': state.settings.difficulty.name,
+              'game_mode': state.settings.mode.name,
+              'pieces_count': newPieces.length,
+            },
+          );
+          print('✅ Firebase リセットログ送信成功');
+        } else {
+          print('⚠️ Firebase未初期化 - リセットログスキップ');
+        }
       } catch (e) {
-        print('⚠️ Firebase リセットログ送信失敗: $e');
+        print('⚠️ Firebase リセットログ送信失敗（続行）: $e');
       }
 
       print('✅ ゲームリセット完了');
@@ -375,28 +475,21 @@ class GameStateNotifier extends StateNotifier<GameState> {
       // 🔥 修正：エラー時の強力なフォールバック処理
       try {
         // 最低限の状態でゲームを継続
+        final fallbackPieces = _generateFallbackPuzzle();
+
         state = GameState(
           gameId: _uuid.v4(),
           settings: state.settings,
-          pieces: [], // 空のピースリスト
-          status: GameStatus.setup, // セットアップ状態
+          pieces: fallbackPieces,
+          status: GameStatus.playing, // 🔥 修正：setup → playing
           moves: 0,
           elapsedSeconds: 0,
           hintsUsed: 0,
           startTime: DateTime.now(),
         );
 
+        _startTimer(); // 🔥 追加：タイマー開始
         print('🔄 フォールバック状態設定完了');
-
-        // フォールバック状態から新しいゲームを開始
-        Future.delayed(const Duration(milliseconds: 100), () {
-          try {
-            startNewGame();
-            print('🔄 フォールバック新ゲーム開始');
-          } catch (fallbackError) {
-            print('❌ フォールバック新ゲーム開始も失敗: $fallbackError');
-          }
-        });
       } catch (fallbackError) {
         print('❌ フォールバック処理も失敗: $fallbackError');
         // 最後の手段：最小限の状態
@@ -413,7 +506,7 @@ class GameStateNotifier extends StateNotifier<GameState> {
     }
   }
 
-  /// ヒント使用（Firebase連携）
+  /// ヒント使用（Firebase連携・安全版）
   void useHint() {
     if (state.status != GameStatus.playing) {
       print('⚠️ ゲーム非プレイ状態でのヒント使用試行');
@@ -426,19 +519,24 @@ class GameStateNotifier extends StateNotifier<GameState> {
         state = state.copyWith(hintsUsed: state.hintsUsed + 1);
         print('✅ ヒント使用: ${state.hintsUsed}回目');
 
-        // Firebase Analytics: ヒント使用
+        // 🔥 修正：Firebase Analytics（安全版）
         try {
-          _firebaseService.logEvent(
-            name: 'hint_used',
-            parameters: {
-              'game_id': state.gameId,
-              'difficulty': state.settings.difficulty.name,
-              'current_moves': state.moves,
-              'hints_total': state.hintsUsed,
-            },
-          );
+          if (_firebaseService.isInitialized) {
+            _firebaseService.logEvent(
+              name: 'hint_used',
+              parameters: {
+                'game_id': state.gameId,
+                'difficulty': state.settings.difficulty.name,
+                'current_moves': state.moves,
+                'hints_total': state.hintsUsed,
+              },
+            );
+            print('✅ ヒント使用ログ送信成功');
+          } else {
+            print('⚠️ Firebase未初期化 - ヒント使用ログスキップ');
+          }
         } catch (e) {
-          print('⚠️ ヒント使用ログ送信失敗: $e');
+          print('⚠️ ヒント使用ログ送信失敗（続行）: $e');
         }
       }
     } catch (e) {
@@ -501,7 +599,7 @@ class GameStateNotifier extends StateNotifier<GameState> {
     }
   }
 
-  /// ゲーム完了処理（Firebase連携）
+  /// ゲーム完了処理（Firebase連携・安全版）
   void _completeGame(bool isSuccess) {
     try {
       state = state.copyWith(
@@ -510,48 +608,61 @@ class GameStateNotifier extends StateNotifier<GameState> {
 
       print('🎯 ゲーム完了: ${isSuccess ? "成功" : "失敗"}');
 
-      // パフォーマンストレース終了
+      // 🔥 修正：パフォーマンストレース終了（安全版）
       try {
-        _gameTrace?.putAttribute('success', isSuccess.toString());
-        _gameTrace?.putAttribute('moves', state.moves.toString());
-        _gameTrace?.putAttribute(
-          'time_seconds',
-          state.elapsedSeconds.toString(),
-        );
-        _gameTrace?.stop();
+        if (_gameTrace != null && _firebaseService.isInitialized) {
+          _gameTrace!.putAttribute('success', isSuccess.toString());
+          _gameTrace!.putAttribute('moves', state.moves.toString());
+          _gameTrace!.putAttribute(
+            'time_seconds',
+            state.elapsedSeconds.toString(),
+          );
+          _gameTrace!.stop();
+          print('✅ Firebase Trace終了');
+        }
       } catch (e) {
-        print('⚠️ パフォーマンストレース終了エラー: $e');
+        print('⚠️ Firebase Trace終了エラー（続行）: $e');
       }
 
-      // Firebase Analytics: ゲーム完了
+      // 🔥 修正：Firebase Analytics（安全版）
       try {
-        _firebaseService.logGameComplete(
-          difficulty: state.settings.difficulty.name,
-          moves: state.moves,
-          timeSeconds: state.elapsedSeconds,
-          hintsUsed: state.hintsUsed,
-          isSuccess: isSuccess,
-        );
+        if (_firebaseService.isInitialized) {
+          _firebaseService.logGameComplete(
+            difficulty: state.settings.difficulty.name,
+            moves: state.moves,
+            timeSeconds: state.elapsedSeconds,
+            hintsUsed: state.hintsUsed,
+            isSuccess: isSuccess,
+          );
+          print('✅ ゲーム完了ログ送信成功');
+        } else {
+          print('⚠️ Firebase未初期化 - ゲーム完了ログスキップ');
+        }
       } catch (e) {
-        print('⚠️ ゲーム完了ログ送信失敗: $e');
+        print('⚠️ ゲーム完了ログ送信失敗（続行）: $e');
       }
 
-      // Firebase Analytics: カスタムイベント
+      // 🔥 修正：カスタムイベント（安全版）
       if (isSuccess) {
         try {
-          // 達成度分析
-          final efficiency = _calculateGameEfficiency();
-          _firebaseService.logEvent(
-            name: 'game_success_analysis',
-            parameters: {
-              'difficulty': state.settings.difficulty.name,
-              'efficiency_score': efficiency,
-              'moves_per_piece': state.moves / state.pieces.length,
-              'time_per_piece': state.elapsedSeconds / state.pieces.length,
-            },
-          );
+          if (_firebaseService.isInitialized) {
+            // 達成度分析
+            final efficiency = _calculateGameEfficiency();
+            _firebaseService.logEvent(
+              name: 'game_success_analysis',
+              parameters: {
+                'difficulty': state.settings.difficulty.name,
+                'efficiency_score': efficiency,
+                'moves_per_piece': state.moves / state.pieces.length,
+                'time_per_piece': state.elapsedSeconds / state.pieces.length,
+              },
+            );
+            print('✅ 成功分析ログ送信成功');
+          } else {
+            print('⚠️ Firebase未初期化 - 成功分析ログスキップ');
+          }
         } catch (e) {
-          print('⚠️ 成功分析ログ送信失敗: $e');
+          print('⚠️ 成功分析ログ送信失敗（続行）: $e');
         }
       }
     } catch (e) {
@@ -731,7 +842,11 @@ class GameStats {
 class GameStatsNotifier extends StateNotifier<GameStats> {
   final FirebaseService _firebaseService;
 
-  GameStatsNotifier(this._firebaseService) : super(const GameStats());
+  GameStatsNotifier(this._firebaseService) : super(const GameStats()) {
+    // 🔥 修正：初期化時のFirebase状態確認
+    print('📊 GameStatsNotifier初期化');
+    print('   Firebase初期化状態: ${_firebaseService.isInitialized}');
+  }
 
   void recordGameCompletion({
     required GameDifficulty difficulty,
@@ -758,35 +873,45 @@ class GameStatsNotifier extends StateNotifier<GameStats> {
         bestTimes: newBestTimes,
       );
 
-      // Firebase Analytics: 新記録達成
+      // 🔥 修正：Firebase Analytics（安全版）
       if (isNewRecord) {
         try {
-          _firebaseService.logEvent(
-            name: 'new_best_time',
-            parameters: {
-              'difficulty': difficulty.name,
-              'best_time_seconds': timeSeconds,
-              'previous_best': currentBest ?? 0,
-            },
-          );
+          if (_firebaseService.isInitialized) {
+            _firebaseService.logEvent(
+              name: 'new_best_time',
+              parameters: {
+                'difficulty': difficulty.name,
+                'best_time_seconds': timeSeconds,
+                'previous_best': currentBest ?? 0,
+              },
+            );
+            print('✅ 新記録ログ送信成功');
+          } else {
+            print('⚠️ Firebase未初期化 - 新記録ログスキップ');
+          }
         } catch (e) {
-          print('⚠️ 新記録ログ送信失敗: $e');
+          print('⚠️ 新記録ログ送信失敗（続行）: $e');
         }
       }
 
-      // Firebase Analytics: 統計更新
+      // 🔥 修正：統計更新ログ（安全版）
       try {
-        _firebaseService.logEvent(
-          name: 'player_stats_update',
-          parameters: {
-            'games_played': state.gamesPlayed,
-            'completion_rate': state.completionRate,
-            'average_time': state.averageTime,
-            'average_moves': state.averageMoves,
-          },
-        );
+        if (_firebaseService.isInitialized) {
+          _firebaseService.logEvent(
+            name: 'player_stats_update',
+            parameters: {
+              'games_played': state.gamesPlayed,
+              'completion_rate': state.completionRate,
+              'average_time': state.averageTime,
+              'average_moves': state.averageMoves,
+            },
+          );
+          print('✅ 統計更新ログ送信成功');
+        } else {
+          print('⚠️ Firebase未初期化 - 統計更新ログスキップ');
+        }
       } catch (e) {
-        print('⚠️ 統計更新ログ送信失敗: $e');
+        print('⚠️ 統計更新ログ送信失敗（続行）: $e');
       }
     } catch (e) {
       print('❌ ゲーム完了記録エラー: $e');
@@ -803,6 +928,7 @@ class GameStatsNotifier extends StateNotifier<GameStats> {
         hintsUsed: state.hintsUsed,
         bestTimes: state.bestTimes,
       );
+      print('📊 ゲーム開始記録完了');
     } catch (e) {
       print('❌ ゲーム開始記録エラー: $e');
     }

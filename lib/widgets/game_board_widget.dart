@@ -1,5 +1,5 @@
 // lib/widgets/game_board_widget.dart - ダブルタップ・手動除去修正版
-import 'dart:async'; // 🔥 追加：Timer用
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../models/game_state.dart';
@@ -207,7 +207,7 @@ class _GameBoardWidgetState extends State<GameBoardWidget>
     }
   }
 
-  /// 🔥 修正：配置済みピースタップ処理（ダブルタップ大幅改善）
+  /// 🔥 完全修正：配置済みピースタップ処理（ダブルタップ大幅改善）
   void _handlePlacedPieceTap(PuzzlePiece piece) {
     final now = DateTime.now();
 
@@ -239,8 +239,8 @@ class _GameBoardWidgetState extends State<GameBoardWidget>
       // 🔥 重要：強力な触覚フィードバック
       HapticFeedback.heavyImpact();
 
-      // 🔥 即座に除去実行
-      _removePieceToTrayWithAnimation(piece.id);
+      // 🔥 修正：確実な除去実行
+      _removePieceToTrayImmediate(piece.id);
 
       // ダブルタップ後は状態リセット
       _lastTapTime = null;
@@ -260,6 +260,73 @@ class _GameBoardWidgetState extends State<GameBoardWidget>
       if (widget.onPieceRemoved != null) {
         _showMessage('もう一度タップで除去', Colors.blue);
       }
+    }
+  }
+
+  /// 🔥 新機能：即座にピースを除去（ダブルタップ用）
+  void _removePieceToTrayImmediate(String pieceId) {
+    print('⚡ 即座にピース除去実行: $pieceId');
+
+    try {
+      // 先に選択状態をクリア
+      _clearSelection();
+
+      // 🔥 重要：確実にコールバック実行
+      if (widget.onPieceRemoved != null) {
+        // 🔥 新機能：除去前の状態確認
+        final targetPiece = widget.gameState.pieces
+            .where((p) => p.id == pieceId)
+            .firstOrNull;
+        if (targetPiece == null) {
+          print('❌ 除去対象ピースが見つかりません: $pieceId');
+          _showMessage('ピースが見つかりませんでした', Colors.red);
+          return;
+        }
+
+        if (!targetPiece.isPlaced) {
+          print('⚠️ ピースは既に配置されていません: $pieceId');
+          _showMessage('ピースは既にトレイにあります', Colors.orange);
+          return;
+        }
+
+        print('🎯 除去実行前の状態:');
+        print('   - ピースID: ${targetPiece.id}');
+        print('   - 配置状態: ${targetPiece.isPlaced}');
+        print('   - 位置: ${targetPiece.boardPosition}');
+
+        // 🔥 重要：コールバック実行
+        widget.onPieceRemoved!(pieceId);
+
+        print('✅ onPieceRemovedコールバック実行完了: $pieceId');
+
+        // 🔥 新機能：除去後の状態確認（少し遅延）
+        Future.delayed(const Duration(milliseconds: 100), () {
+          final updatedPiece = widget.gameState.pieces
+              .where((p) => p.id == pieceId)
+              .firstOrNull;
+          print('🔍 除去後の状態確認:');
+          print('   - ピースID: ${updatedPiece?.id}');
+          print('   - 配置状態: ${updatedPiece?.isPlaced}');
+          print('   - 位置: ${updatedPiece?.boardPosition}');
+
+          if (updatedPiece?.isPlaced == false) {
+            print('✅ UI側除去確認成功');
+          } else {
+            print('❌ UI側除去確認失敗: まだ配置状態');
+          }
+        });
+      } else {
+        print('❌ onPieceRemovedがnullです');
+        _showMessage('除去機能が利用できません', Colors.red);
+        return;
+      }
+
+      // 成功時の処理
+      HapticFeedback.mediumImpact();
+    } catch (e, stackTrace) {
+      print('❌ 即座ピース除去エラー: $e');
+      print('スタックトレース: $stackTrace');
+      _showMessage('ピース除去に失敗しました', Colors.red);
     }
   }
 
@@ -446,7 +513,7 @@ class _GameBoardWidgetState extends State<GameBoardWidget>
 
         onDragStarted: () {
           print('🚀 配置済みピース全体ドラッグ開始: ${piece.id}');
-          _removePieceToTrayWithAnimation(piece.id);
+          _removePieceToTrayImmediate(piece.id); // 🔥 修正：即座除去メソッドを使用
           HapticFeedback.lightImpact();
         },
 
@@ -530,7 +597,7 @@ class _GameBoardWidgetState extends State<GameBoardWidget>
             heroTag: "remove_piece_instant", // 別のheroTag
             onPressed: () {
               if (_selectedPlacedPieceId != null) {
-                _removePieceToTrayWithAnimation(_selectedPlacedPieceId!);
+                _removePieceToTrayImmediate(_selectedPlacedPieceId!); // 🔥 修正
               }
             },
             backgroundColor: Colors.orange,
@@ -568,7 +635,7 @@ class _GameBoardWidgetState extends State<GameBoardWidget>
               onPressed: () {
                 Navigator.of(context).pop();
                 if (_selectedPlacedPieceId != null) {
-                  _removePieceToTrayWithAnimation(_selectedPlacedPieceId!);
+                  _removePieceToTrayImmediate(_selectedPlacedPieceId!); // 🔥 修正
                 }
               },
               style: ElevatedButton.styleFrom(backgroundColor: Colors.red),

@@ -1,4 +1,4 @@
-// lib/providers/game_providers.dart - リセット機能修正版（重要な部分のみ）
+// lib/providers/game_providers.dart
 import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:firebase_performance/firebase_performance.dart';
@@ -10,6 +10,11 @@ import '../services/firebase_service.dart';
 import 'dart:math' as math;
 
 const _uuid = Uuid();
+
+/// 🔥 新機能：拡張メソッドでfirstOrNullを追加
+extension IterableExtension<T> on Iterable<T> {
+  T? get firstOrNull => isEmpty ? null : first;
+}
 
 /// ゲーム設定プロバイダー
 final gameSettingsProvider =
@@ -160,22 +165,109 @@ class GameStateNotifier extends StateNotifier<GameState> {
     }
   }
 
-  /// 🔥 修正：ピースを盤面から取り除く（エラーハンドリング強化）
+  /// 🔥 完全修正：ピースを盤面から取り除く（状態更新強化）
   void removePiece(String pieceId) {
     try {
-      final pieces = state.pieces.map((piece) {
-        if (piece.id == pieceId) {
-          return piece.copyWith(boardPosition: null);
-        }
-        return piece;
-      }).toList();
+      print('🔄 ピース除去開始: $pieceId');
 
-      state = state.copyWith(pieces: pieces);
-      print('✅ ピース除去: $pieceId');
-    } catch (e) {
+      // 🔥 修正：現在の状態を詳細ログ出力
+      final targetPiece = state.pieces
+          .where((p) => p.id == pieceId)
+          .firstOrNull;
+      if (targetPiece == null) {
+        print('❌ 指定されたピースが見つかりません: $pieceId');
+        return;
+      }
+
+      print('   除去前の状態:');
+      print('   - ピースID: ${targetPiece.id}');
+      print('   - 配置状態: ${targetPiece.isPlaced}');
+      print('   - 位置: ${targetPiece.boardPosition}');
+      print('   - 総ピース数: ${state.pieces.length}');
+      print('   - 配置済みピース数: ${state.pieces.where((p) => p.isPlaced).length}');
+
+      // 🔥 重要：強制的に新しいリストを作成
+      final updatedPieces = <PuzzlePiece>[];
+
+      for (final piece in state.pieces) {
+        if (piece.id == pieceId) {
+          // 🔥 修正：新しいメソッドを使用して確実に配置解除
+          final removedPiece = piece.createUnplacedCopy();
+          updatedPieces.add(removedPiece);
+          print('   ✅ ピース除去実行: ${piece.id} -> ${removedPiece.boardPosition}');
+        } else {
+          updatedPieces.add(piece);
+        }
+      }
+
+      // 🔥 修正：強制的に新しい状態を作成
+      final newState = GameState(
+        gameId: state.gameId,
+        settings: state.settings,
+        pieces: updatedPieces, // 🔥 重要：新しいリストを設定
+        status: state.status,
+        moves: state.moves,
+        elapsedSeconds: state.elapsedSeconds,
+        hintsUsed: state.hintsUsed,
+        startTime: state.startTime,
+      );
+
+      // 🔥 重要：状態を完全に置き換え
+      state = newState;
+
+      // 🔥 修正：除去後の状態確認
+      final removedPiece = state.pieces
+          .where((p) => p.id == pieceId)
+          .firstOrNull;
+      print('   除去後の状態:');
+      print('   - ピースID: ${removedPiece?.id}');
+      print('   - 配置状態: ${removedPiece?.isPlaced}');
+      print('   - 位置: ${removedPiece?.boardPosition}');
+      print('   - 配置済みピース数: ${state.pieces.where((p) => p.isPlaced).length}');
+
+      if (removedPiece?.isPlaced == false) {
+        print('✅ ピース除去成功: $pieceId');
+      } else {
+        print('❌ ピース除去失敗: まだ配置状態です');
+      }
+
+      // 🔥 新機能：UI更新を強制的にトリガー
+      _forceUIUpdate();
+    } catch (e, stackTrace) {
       print('❌ ピース除去エラー: $e');
+      print('スタックトレース: $stackTrace');
       rethrow;
     }
+  }
+
+  /// 🔥 新機能：UI更新を強制的にトリガー
+  void _forceUIUpdate() {
+    try {
+      // 状態を微細に変更してnotifyListenersを確実に発火
+      final currentTime = DateTime.now();
+      state = state.copyWith(startTime: currentTime);
+      print('🔄 UI強制更新トリガー実行');
+    } catch (e) {
+      print('❌ UI強制更新エラー: $e');
+    }
+  }
+
+  /// 🔥 新機能：デバッグ用の状態確認
+  void debugCurrentState() {
+    print('=== 現在のゲーム状態デバッグ ===');
+    print('ゲームID: ${state.gameId}');
+    print('ステータス: ${state.status}');
+    print('総ピース数: ${state.pieces.length}');
+    print('配置済みピース数: ${state.pieces.where((p) => p.isPlaced).length}');
+    print('未配置ピース数: ${state.pieces.where((p) => !p.isPlaced).length}');
+
+    for (int i = 0; i < state.pieces.length; i++) {
+      final piece = state.pieces[i];
+      print(
+        '  ピース$i: ${piece.id.substring(0, 8)} - 配置: ${piece.isPlaced} - 位置: ${piece.boardPosition}',
+      );
+    }
+    print('==========================');
   }
 
   /// ゲーム一時停止
